@@ -1,0 +1,12 @@
+# Secrets & credentials — JAMAIS dans le repo (cf. CLAUDE.md §Secrets)
+.env
+.env.*
+.clasp.json
+*credentials*.json
+*client_secret*.json
+*.key
+*.pem
+
+# Outils locaux
+node_modules/
+.DS_Store
