@@ -20,13 +20,8 @@ var NOM_SHEET_CONFIG = 'BIOXA-Newsletters-Config';
  */
 var PROP_ID_SHEET_CONFIG = 'CONFIG_SHEET_ID';
 
-/** Clé Script Property contenant la clé API Anthropic (jamais dans le code/Sheet). */
-var PROP_CLE_API_ANTHROPIC = 'ANTHROPIC_API_KEY';
-
-/** Noms des onglets techniques (préfixe `_`) de la plateforme. */
+/** Nom de l'onglet de configuration globale (préfixe `_`). */
 var ONGLET_CONFIG = '_config';
-var ONGLET_HISTORIQUE = '_historique';
-var ONGLET_LOGS = '_logs';
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Entry points par newsletter (appelés par les triggers temporels, incr. 6).
@@ -45,11 +40,10 @@ function executerNewsletterDSI() {
  * Incrément 1 : charge et logge la config ; le pipeline arrive aux incréments 2+.
  *
  * @param {string} idNewsletter Identifiant = nom de l'onglet (ex: "DSI").
- * @param {{dryRun?: boolean}} [options] Options d'exécution (dry-run, incr. 4).
  * @return {void}
  * @throws {Error} Si la Sheet ou l'onglet de la newsletter est introuvable.
  */
-function executerNewsletter(idNewsletter, options) {
+function executerNewsletter(idNewsletter) {
   var config = lireConfig(idNewsletter);
   Logger.log('Config chargée pour la newsletter "%s" (%s sources, %s destinataires).',
     config.id, config.sources.length, config.destinataires.length);

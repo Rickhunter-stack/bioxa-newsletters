@@ -1,6 +1,7 @@
- {
-     "name": "bioxa-newsletters",
-     "version": "0.1.0",
-     "description": "Plateforme Apps Script (pas de dépendances npm)",
-     "private": true
-   }
+{
+  "_comment": "Présent UNIQUEMENT pour neutraliser le 'npm install' du setup sandbox Claude Code Cloud. Aucune dépendance npm réelle (projet 100% Google Apps Script, sans build). À supprimer dès que le setup script pourra être vidé via l'UI Claude Code Cloud.",
+  "name": "bioxa-newsletters",
+  "version": "0.1.0",
+  "description": "Plateforme Apps Script (pas de dépendances npm)",
+  "private": true
+}
