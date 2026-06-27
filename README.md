@@ -19,8 +19,10 @@ Le pipeline (collecte → pré-filtre → scoring → rendu → envoi) arrive au
 |---|---|
 | `Code.gs` | Entry points par newsletter (`executerNewsletterDSI`) + `executerNewsletter(id)` + constantes |
 | `src_config.gs` | `lireConfig(idNewsletter)` — **unique point de lecture de la Sheet** |
-| `src_test.gs` | Tests manuels (`testerLireConfig`) |
+| `src_init.gs` | `initialiserSheetDeConfig()` — crée les onglets manquants (idempotent) ; `_ecrireSheet_` = unique point d'écriture |
+| `src_test.gs` | Tests manuels (`testerInitialiserSheet`, `testerLireConfig`) |
 | `appsscript.json` | Manifest (timezone Europe/Paris, runtime V8) |
+| `DECISIONS.md` | Décisions implicites (clés exactes, tokens, formats) + exemples de remplissage DSI |
 
 ## Structure de la Google Sheet `BIOXA-Newsletters-Config`
 
@@ -44,39 +46,32 @@ En-têtes ligne 1 : `url_hash` · `sent_at` · `newsletter` · `url` · `title`.
 ### Onglet `_logs` (1 ligne par run)
 En-têtes ligne 1 : `timestamp` · `newsletter` · `nb_collectes` · `nb_pre_filtres` · `nb_scores` · `nb_envoyes` · `duree_sec` · `statut` · `message`.
 
-### Onglet `DSI` (template, identique pour `Qualite`, `RH`, …)
+### Onglet `DSI` (template neutre, identique pour `Qualite`, `RH`, …)
 Quatre blocs dans le **même onglet**. `lireConfig` localise les tableaux par leurs
 en-têtes (insensible à la casse), donc l'ordre exact des lignes est tolérant.
 
-**Bloc 1 — Paramètres** (colonnes A/B, format clé/valeur) :
+> L'onglet créé par `initialiserSheetDeConfig()` est **neutre** : cellules de config
+> vides (sauf défauts systémiques), exemples DSI en **Notes de cellules**. Cela
+> permet de **dupliquer l'onglet** pour créer une autre newsletter sans héritage de
+> valeurs DSI. Exemples de remplissage DSI copiables : voir `DECISIONS.md`.
 
-| Clé (col. A) | Exemple (col. B) | Type |
-|---|---|---|
-| `nom` | DSI — Cyber et IA | string |
-| `referent_metier` | (nom du référent) | string |
-| `jour_envoi` | lundi | string |
-| `heure_envoi` | 8 | number |
-| `cadence` | hebdo | string (`hebdo`/`mensuel`) |
-| `n_items_par_rubrique` | 5 | number |
-| `couleur` | `#1a3e5c` | string (hex en-tête HTML) |
-| `sous_titre` | Veille cybersécurité & IA | string |
-| `active` | TRUE | bool |
+**Bloc 1 — Paramètres** (colonnes A/B, format clé/valeur). Clés col. A :
+`nom`, `referent_metier`, `jour_envoi`, `heure_envoi` (0–23), `cadence`
+(`hebdo`/`mensuel`), `n_items_par_rubrique`, `couleur` (hex), `sous_titre`,
+`active` (bool). Défauts systémiques pré-remplis par l'init : `cadence=hebdo`,
+`n_items_par_rubrique=5`, `couleur=#1a3e5c`, `active=FALSE`.
 
-**Bloc 2 — Prompt système** : une ligne avec en col. A le libellé `prompt_systeme`
-et en col. B le prompt (cellule multi-lignes). **1re ligne du prompt = label de
-version** au format `# v2026-06-25` (repris dans le pied de la newsletter).
+**Bloc 2 — Prompt système** : une ligne, col. A = libellé `prompt_systeme`,
+col. B = prompt (multi-lignes). **1re ligne = label de version** `# v2026-06-25`
+(repris dans le pied de la newsletter).
 
-**Bloc 3 — Tableau Sources** (colonnes A-E, sous une ligne d'en-têtes) :
+**Bloc 3 — Tableau Sources** (colonnes A-E, en-têtes ligne 13) :
+`Active | Rubrique | Nom source | URL RSS | Filter keywords`.
 
-| Active | Rubrique | Nom source | URL RSS | Filter keywords |
-|---|---|---|---|---|
-| TRUE | Cyberattaques santé | CERT Santé | https://… | healthcare |
+**Bloc 4 — Tableau Destinataires** (colonnes G-I même onglet, en-têtes ligne 13) :
+`Active | Email | Nom`.
 
-**Bloc 4 — Tableau Destinataires** (colonnes G-I, même onglet) :
-
-| Active | Email | Nom |
-|---|---|---|
-| TRUE | … | … |
+Conventions de remplissage (clés exactes, tokens booléens, formats) : `DECISIONS.md`.
 
 ## Objet retourné par `lireConfig("DSI")`
 
@@ -99,12 +94,15 @@ sauf si la Sheet ou l'onglet de la newsletter est totalement introuvable.
 ## Tester (éditeur Apps Script)
 
 1. Copier les fichiers `.gs` + `appsscript.json` dans le projet Apps Script (ou `clasp push`).
-2. Si projet **autonome** : renseigner la Script Property `CONFIG_SHEET_ID` avec
-   l'ID de la Sheet `BIOXA-Newsletters-Config`
-   (`Paramètres du projet` → `Propriétés du script`).
-   Si projet **lié** à la Sheet (container-bound), rien à faire.
-3. Exécuter `testerLireConfig` et lire « Journaux d'exécution ».
-   La config DSI s'affiche en JSON + contrôles rapides.
+2. Créer une Sheet vierge `BIOXA-Newsletters-Config`. Si projet **autonome** :
+   renseigner la Script Property `CONFIG_SHEET_ID` avec son ID
+   (`Paramètres du projet` → `Propriétés du script`). Si projet **lié** à la Sheet
+   (container-bound), rien à faire.
+3. Exécuter **`testerInitialiserSheet`** : crée les 4 onglets avec en-têtes,
+   défauts et exemples (Notes). Idempotent (relançable sans risque).
+4. (Optionnel) remplir l'onglet `DSI` avec les exemples de `DECISIONS.md`.
+5. Exécuter **`testerLireConfig`** et lire « Journaux d'exécution » : la config DSI
+   s'affiche en JSON + contrôles rapides.
 
 ## Secrets
 

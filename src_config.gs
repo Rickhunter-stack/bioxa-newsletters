@@ -142,17 +142,22 @@ function _lireConfigGlobale_(classeur) {
     }
   }
 
-  function val(cle) {
-    return Object.prototype.hasOwnProperty.call(brut, cle) && brut[cle] !== ''
-      ? brut[cle] : CONFIG_GLOBALE_DEFAUTS[cle];
+  // Présent = clé connue dans la Sheet avec une valeur non vide.
+  function present(cle) {
+    return Object.prototype.hasOwnProperty.call(brut, cle) && _texte_(brut[cle]) !== '';
+  }
+  function typer(cle, type) {
+    return present(cle)
+      ? _typerAvecWarning_(brut[cle], type, CONFIG_GLOBALE_DEFAUTS[cle], ONGLET_CONFIG, cle)
+      : CONFIG_GLOBALE_DEFAUTS[cle];
   }
 
   return {
-    claudeModel: _texte_(val('claude_model')),
-    claudeApiEndpoint: _texte_(val('claude_api_endpoint')),
-    gmailQuotaJour: _nombre_(val('gmail_quota_jour'), CONFIG_GLOBALE_DEFAUTS.gmail_quota_jour),
-    adminEmail: _texte_(val('admin_email')),
-    dryRunGlobal: _booleen_(val('dry_run_global'))
+    claudeModel: typer('claude_model', 'string'),
+    claudeApiEndpoint: typer('claude_api_endpoint', 'string'),
+    gmailQuotaJour: typer('gmail_quota_jour', 'number'),
+    adminEmail: typer('admin_email', 'string'),
+    dryRunGlobal: typer('dry_run_global', 'bool')
   };
 }
 
@@ -165,11 +170,20 @@ function _lireConfigGlobale_(classeur) {
  * @private
  */
 function _lireBlocParametres_(valeurs, idNewsletter) {
+  // Ne retenir QUE les clés connues, en PREMIER-écrit-gagne. Le bloc paramètres
+  // est en haut de l'onglet ; les en-têtes du tableau Sources situé plus bas
+  // (colonne A « Active ») ne doivent donc PAS écraser le paramètre `active` de
+  // la newsletter (bug corrigé — audit incr. 1, point #1).
+  var clesConnues = {};
+  for (var k = 0; k < PARAMS_NEWSLETTER.length; k++) {
+    clesConnues[PARAMS_NEWSLETTER[k].cle] = true;
+  }
+
   var brut = {};
   for (var i = 0; i < valeurs.length; i++) {
-    var cle = _texte_(valeurs[i][0]);
-    if (cle) {
-      brut[cle.toLowerCase()] = valeurs[i][1];
+    var cle = _texte_(valeurs[i][0]).toLowerCase();
+    if (cle && clesConnues[cle] && !Object.prototype.hasOwnProperty.call(brut, cle)) {
+      brut[cle] = valeurs[i][1]; // premier-écrit-gagne
     }
   }
 
@@ -184,7 +198,8 @@ function _lireBlocParametres_(valeurs, idNewsletter) {
       resultat[def.prop] = def.defaut;
       continue;
     }
-    resultat[def.prop] = _typer_(brut[def.cle], def.type, def.defaut);
+    resultat[def.prop] = _typerAvecWarning_(
+      brut[def.cle], def.type, def.defaut, idNewsletter, def.cle);
   }
   return resultat;
 }
@@ -237,8 +252,9 @@ function _extraireVersionPrompt_(prompt) {
  */
 function _lireSources_(valeurs, idNewsletter) {
   var tab = _localiserTableau_(valeurs, ['rubrique', 'url rss']);
-  if (!tab) {
-    Logger.log('[lireConfig][WARN] %s : tableau Sources introuvable (en-têtes Rubrique/URL RSS).', idNewsletter);
+  if (!tab.trouve) {
+    Logger.log('[lireConfig][WARN] %s : tableau Sources introuvable — en-tête(s) manquant(s) : %s.',
+      idNewsletter, tab.manquants.join(', '));
     return [];
   }
   var cols = tab.colonnes;
@@ -271,8 +287,9 @@ function _lireSources_(valeurs, idNewsletter) {
  */
 function _lireDestinataires_(valeurs, idNewsletter) {
   var tab = _localiserTableau_(valeurs, ['email', 'nom']);
-  if (!tab) {
-    Logger.log('[lireConfig][WARN] %s : tableau Destinataires introuvable (en-têtes Email/Nom).', idNewsletter);
+  if (!tab.trouve) {
+    Logger.log('[lireConfig][WARN] %s : tableau Destinataires introuvable — en-tête(s) manquant(s) : %s.',
+      idNewsletter, tab.manquants.join(', '));
     return [];
   }
   var cols = tab.colonnes;
@@ -294,14 +311,17 @@ function _lireDestinataires_(valeurs, idNewsletter) {
 
 /**
  * Localise un tableau par sa ligne d'en-tête : trouve la première ligne
- * contenant TOUS les libellés requis (insensible à la casse) et retourne la
- * map libellé→index de colonne.
+ * contenant TOUS les libellés requis (insensible à la casse). Si aucune ligne
+ * ne matche complètement, renvoie `trouve:false` + la liste des en-têtes
+ * manquants de la meilleure ligne candidate (pour un warning explicite, #6).
  * @param {Array.<Array>} valeurs
  * @param {Array.<string>} enTetesRequis En minuscules.
- * @return {?{ligneEnTete: number, colonnes: !Object.<string, number>}}
+ * @return {{trouve: boolean, ligneEnTete: number,
+ *           colonnes: !Object.<string, number>, manquants: Array.<string>}}
  * @private
  */
 function _localiserTableau_(valeurs, enTetesRequis) {
+  var meilleursManquants = enTetesRequis.slice();
   for (var r = 0; r < valeurs.length; r++) {
     var cols = {};
     for (var c = 0; c < valeurs[r].length; c++) {
@@ -310,24 +330,26 @@ function _localiserTableau_(valeurs, enTetesRequis) {
         cols[libelle] = c;
       }
     }
-    var complet = true;
+    var manquants = [];
     for (var i = 0; i < enTetesRequis.length; i++) {
       if (!Object.prototype.hasOwnProperty.call(cols, enTetesRequis[i])) {
-        complet = false;
-        break;
+        manquants.push(enTetesRequis[i]);
       }
     }
-    if (complet) {
-      return { ligneEnTete: r, colonnes: cols };
+    if (manquants.length === 0) {
+      return { trouve: true, ligneEnTete: r, colonnes: cols, manquants: [] };
+    }
+    if (manquants.length < meilleursManquants.length) {
+      meilleursManquants = manquants;
     }
   }
-  return null;
+  return { trouve: false, ligneEnTete: -1, colonnes: {}, manquants: meilleursManquants };
 }
 
 /* ── Conversions / typage défensif ──────────────────────────────────────── */
 
 /**
- * Récupère une cellule par index, null si hors borne ou index indéfini.
+ * Récupère une cellule par index ; renvoie '' si index indéfini ou hors borne.
  * @param {Array} ligne
  * @param {?number} idx
  * @return {*}
@@ -338,19 +360,36 @@ function _cell_(ligne, idx) {
 }
 
 /**
- * Convertit une valeur selon un type cible.
- * @param {*} valeur
+ * Convertit une valeur PRÉSENTE (non vide) selon un type cible, et logge un
+ * warning si le parsing échoue (cellule présente mais illisible → défaut, #2).
+ * @param {*} valeur Valeur brute non vide.
  * @param {string} type 'string' | 'number' | 'bool'
- * @param {*} defaut
+ * @param {*} defaut Valeur de repli en cas d'échec de parsing.
+ * @param {string} contexte Identifiant pour le log (idNewsletter ou '_config').
+ * @param {string} cle Nom de la clé/paramètre pour le log.
  * @return {*}
  * @private
  */
-function _typer_(valeur, type, defaut) {
-  switch (type) {
-    case 'number': return _nombre_(valeur, defaut);
-    case 'bool':   return _booleen_(valeur);
-    default:       return _texte_(valeur);
+function _typerAvecWarning_(valeur, type, defaut, contexte, cle) {
+  if (type === 'number') {
+    var rn = _parserNombre_(valeur);
+    if (!rn.ok) {
+      Logger.log('[lireConfig][WARN] %s : "%s" = "%s" non numérique → défaut (%s).',
+        contexte, cle, _texte_(valeur), defaut);
+      return defaut;
+    }
+    return rn.valeur;
   }
+  if (type === 'bool') {
+    var rb = _parserBooleen_(valeur);
+    if (!rb.ok) {
+      Logger.log('[lireConfig][WARN] %s : "%s" = "%s" non booléen → défaut (%s).',
+        contexte, cle, _texte_(valeur), defaut);
+      return defaut;
+    }
+    return rb.valeur;
+  }
+  return _texte_(valeur);
 }
 
 /**
@@ -364,30 +403,46 @@ function _texte_(v) {
 }
 
 /**
- * Convertit en nombre ; échec → valeur par défaut.
+ * Parse un nombre. Accepte le natif et la virgule décimale.
  * @param {*} v
- * @param {*} defaut
- * @return {number}
+ * @return {{ok: boolean, valeur: ?number}} ok=false si non vide et illisible.
  * @private
  */
-function _nombre_(v, defaut) {
+function _parserNombre_(v) {
   if (typeof v === 'number') {
-    return v;
+    return { ok: true, valeur: v };
   }
   var n = parseFloat(_texte_(v).replace(',', '.'));
-  return isNaN(n) ? defaut : n;
+  return isNaN(n) ? { ok: false, valeur: null } : { ok: true, valeur: n };
 }
 
 /**
- * Convertit en booléen : accepte true natif, ainsi que TRUE/VRAI/OUI/1.
+ * Parse un booléen. Vrai : true/vrai/oui/1. Faux : false/faux/non/0.
+ * @param {*} v
+ * @return {{ok: boolean, valeur: boolean}} ok=false si non vide et non reconnu.
+ * @private
+ */
+function _parserBooleen_(v) {
+  if (typeof v === 'boolean') {
+    return { ok: true, valeur: v };
+  }
+  var s = _texte_(v).toLowerCase();
+  if (s === 'true' || s === 'vrai' || s === 'oui' || s === '1') {
+    return { ok: true, valeur: true };
+  }
+  if (s === 'false' || s === 'faux' || s === 'non' || s === '0') {
+    return { ok: true, valeur: false };
+  }
+  return { ok: false, valeur: false };
+}
+
+/**
+ * Convertit en booléen sans warning (contextes où l'échec → false est anodin,
+ * ex. colonne `Active` d'une ligne de source/destinataire).
  * @param {*} v
  * @return {boolean}
  * @private
  */
 function _booleen_(v) {
-  if (typeof v === 'boolean') {
-    return v;
-  }
-  var s = _texte_(v).toLowerCase();
-  return s === 'true' || s === 'vrai' || s === 'oui' || s === '1';
+  return _parserBooleen_(v).valeur;
 }

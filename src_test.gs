@@ -36,3 +36,14 @@ function testerLireConfig() {
     Logger.log('[TEST][WARN] Aucun destinataire lu — vérifier le tableau Destinataires (en-têtes Email/Nom).');
   }
 }
+
+/**
+ * Crée/complète les onglets manquants de la Sheet de config puis logge le récap.
+ * À lancer UNE fois sur une Sheet neuve avant testerLireConfig. Idempotent :
+ * relançable sans risque (les onglets existants sont conservés).
+ * @return {void}
+ */
+function testerInitialiserSheet() {
+  initialiserSheetDeConfig();
+  Logger.log('--- Init terminée. Lance maintenant testerLireConfig pour vérifier la lecture. ---');
+}
