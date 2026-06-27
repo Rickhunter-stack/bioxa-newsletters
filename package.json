@@ -1,0 +1,6 @@
+ {
+     "name": "bioxa-newsletters",
+     "version": "0.1.0",
+     "description": "Plateforme Apps Script (pas de dépendances npm)",
+     "private": true
+   }
