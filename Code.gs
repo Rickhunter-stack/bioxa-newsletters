@@ -59,9 +59,14 @@ function executerNewsletter(idNewsletter) {
   Logger.log('Config chargée pour la newsletter "%s" (%s sources, %s destinataires).',
     config.id, config.sources.length, config.destinataires.length);
 
-  // TODO incr. 2 : collecterItems(idNewsletter, config)
-  // TODO incr. 2 : dedoublonner(items)
-  // TODO incr. 3 : prefilterTitres(items) puis scorerEtResumer(items)
+  var collecte = collecterItems(idNewsletter, config);
+  var dedup = dedoublonner(collecte.items, idNewsletter);
+  Logger.log('Pipeline "%s" : %s collectés → %s uniques (%s intra-run, %s historique) ; %s/%s sources OK.',
+    idNewsletter, collecte.items.length, dedup.retenus.length,
+    dedup.rejetesIntraRun, dedup.rejetesHistorique,
+    collecte.santeCollecte.sourcesOk, collecte.santeCollecte.sourcesTotal);
+
+  // TODO incr. 3 : prefilterTitres(dedup.retenus) puis scorerEtResumer(...)
   // TODO incr. 4 : genererHTML(config, items)
-  // TODO incr. 5 : envoyerGmail(config, html) + logRun(...) + historique
+  // TODO incr. 5 : envoyerGmail(config, html) + logRun(...) + écriture _historique
 }
