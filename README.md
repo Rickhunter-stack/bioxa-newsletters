@@ -22,7 +22,8 @@ Le pipeline (collecte → pré-filtre → scoring → rendu → envoi) arrive au
 | `src_init.gs` | `initialiserSheetDeConfig()` — crée les onglets manquants (idempotent) ; `_ecrireSheet_` = unique point d'écriture |
 | `src_collecte.gs` | `collecterItems(idNewsletter, config)` — collecte RSS/Atom parallèle (PRD M1) |
 | `src_dedup.gs` | `dedoublonner(items, idNewsletter)` — dédup par hash d'URL vs `_historique` (PRD M2) |
-| `src_test.gs` | Tests manuels (`testerInitialiserSheet`, `testerLireConfig`, `testerCanonicaliserUrl`, `testerCollecte`, `testerCollecteEtDedup`) |
+| `src_claude.gs` | `prefilterTitres` + `scorerEtResumer` via `appelerClaudeBatch` — Claude Batch (PRD M3/M4) |
+| `src_test.gs` | Tests manuels (init, lireConfig, canonicalisation, collecte, dédup, parse Claude offline, pré-filtre/scoring réels) |
 | `appsscript.json` | Manifest (timezone Europe/Paris, runtime V8) |
 | `DECISIONS.md` | Décisions implicites (clés exactes, tokens, formats) + exemples de remplissage DSI |
 
@@ -38,9 +39,13 @@ En-têtes ligne 1 : `Clé | Valeur`. Une ligne par paramètre.
 | `gmail_quota_jour` | `100` | number | Quota Gmail/jour (compte gratuit) |
 | `admin_email` | *(à remplir)* | string | Destinataire des rapports/alertes |
 | `dry_run_global` | `FALSE` | bool | Bascule globale dry-run |
+| `prix_input_per_million_tokens` | `1` | number | Prix input Haiku 4.5 (USD/M, estimation coût) |
+| `prix_output_per_million_tokens` | `5` | number | Prix output Haiku 4.5 (USD/M, estimation coût) |
 
 > La **clé API Anthropic** n'est PAS dans la Sheet : elle est stockée dans
-> `PropertiesService.getScriptProperties()` sous `ANTHROPIC_API_KEY`.
+> `PropertiesService.getScriptProperties()` sous `ANTHROPIC_API_KEY`. Elle est
+> **requise** pour les appels Claude (incr. 3) ; sans elle, `prefilterTitres` /
+> `scorerEtResumer` lèvent une erreur explicite.
 
 ### Onglet `_historique` (1 ligne par item envoyé)
 En-têtes ligne 1 : `url_hash` · `sent_at` · `newsletter` · `url` · `title`.
@@ -110,6 +115,11 @@ sauf si la Sheet ou l'onglet de la newsletter est totalement introuvable.
 7. **`testerCollecte`** / **`testerCollecteEtDedup`** : collecte RSS réelle des
    sources DSI (réseau requis) ; logge items par rubrique, sources HS et compteurs
    de déduplication.
+8. **`testerParseSortieClaude`** : test **offline** (sans réseau ni clé API) du
+   parsing JSONL + ré-appariement par `custom_id` + extraction des sorties structurées.
+9. **`testerPrefilter`** / **`testerScoring`** / **`testerClaudeBatchBoutEnBout`** :
+   appels **réels** à Claude Batch (réseau + `ANTHROPIC_API_KEY` requis, consomment
+   des tokens). Poser d'abord la Script Property `ANTHROPIC_API_KEY`.
 
 ## Secrets
 

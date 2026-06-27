@@ -19,7 +19,9 @@ var CONFIG_GLOBALE_DEFAUTS = {
   claude_api_endpoint: 'https://api.anthropic.com/v1/messages/batches',
   gmail_quota_jour: 100,
   admin_email: '',
-  dry_run_global: false
+  dry_run_global: false,
+  prix_input_per_million_tokens: 1,
+  prix_output_per_million_tokens: 5
 };
 
 /**
@@ -47,7 +49,8 @@ var PARAMS_NEWSLETTER = [
  * @return {{
  *   id: string,
  *   global: {claudeModel: string, claudeApiEndpoint: string, gmailQuotaJour: number,
- *            adminEmail: string, dryRunGlobal: boolean},
+ *            adminEmail: string, dryRunGlobal: boolean,
+ *            prixInputParMillion: number, prixOutputParMillion: number},
  *   nom: string, referentMetier: string, jourEnvoi: string, heureEnvoi: ?number,
  *   cadence: string, nItemsParRubrique: number, couleur: string, sousTitre: string,
  *   active: boolean, promptSysteme: ?string, promptVersion: ?string,
@@ -168,7 +171,8 @@ function _lireColonneOnglet_(nomOnglet, nomColonne) {
  * Lit l'onglet `_config` global (clé/valeur) avec valeurs par défaut + typage.
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} classeur
  * @return {{claudeModel: string, claudeApiEndpoint: string, gmailQuotaJour: number,
- *           adminEmail: string, dryRunGlobal: boolean}}
+ *           adminEmail: string, dryRunGlobal: boolean,
+ *           prixInputParMillion: number, prixOutputParMillion: number}}
  * @private
  */
 function _lireConfigGlobale_(classeur) {
@@ -201,7 +205,9 @@ function _lireConfigGlobale_(classeur) {
     claudeApiEndpoint: typer('claude_api_endpoint', 'string'),
     gmailQuotaJour: typer('gmail_quota_jour', 'number'),
     adminEmail: typer('admin_email', 'string'),
-    dryRunGlobal: typer('dry_run_global', 'bool')
+    dryRunGlobal: typer('dry_run_global', 'bool'),
+    prixInputParMillion: typer('prix_input_per_million_tokens', 'number'),
+    prixOutputParMillion: typer('prix_output_per_million_tokens', 'number')
   };
 }
 
