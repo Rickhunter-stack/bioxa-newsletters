@@ -20,8 +20,19 @@ var NOM_SHEET_CONFIG = 'BIOXA-Newsletters-Config';
  */
 var PROP_ID_SHEET_CONFIG = 'CONFIG_SHEET_ID';
 
-/** Nom de l'onglet de configuration globale (préfixe `_`). */
-var ONGLET_CONFIG = '_config';
+/**
+ * Noms des onglets techniques (préfixe `_`) de la plateforme. Source de vérité
+ * unique, réutilisée par src_init (création), src_collecte/src_dedup (incr. 2),
+ * src_envoi/src_logs (incr. 5) et l'observabilité (incr. 8).
+ */
+var ONGLETS_TECHNIQUES = {
+  config: '_config',
+  historique: '_historique',
+  logs: '_logs'
+};
+
+/** Onglet de configuration globale (alias de commodité). */
+var ONGLET_CONFIG = ONGLETS_TECHNIQUES.config;
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Entry points par newsletter (appelés par les triggers temporels, incr. 6).

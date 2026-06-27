@@ -26,13 +26,13 @@
 function initialiserSheetDeConfig() {
   var classeur = _ouvrirSheetConfig_();
 
-  var attendus = [ONGLET_CONFIG, '_historique', '_logs', 'DSI'];
-  var builders = {
-    '_config': _initOngletConfig_,
-    '_historique': _initOngletHistorique_,
-    '_logs': _initOngletLogs_,
-    'DSI': _initOngletDSI_
-  };
+  var attendus = [ONGLETS_TECHNIQUES.config, ONGLETS_TECHNIQUES.historique,
+    ONGLETS_TECHNIQUES.logs, 'DSI'];
+  var builders = {};
+  builders[ONGLETS_TECHNIQUES.config] = _initOngletConfig_;
+  builders[ONGLETS_TECHNIQUES.historique] = _initOngletHistorique_;
+  builders[ONGLETS_TECHNIQUES.logs] = _initOngletLogs_;
+  builders['DSI'] = _initOngletDSI_;
 
   var crees = [];
   var conserves = [];
@@ -91,7 +91,7 @@ function _initOngletConfig_(classeur) {
  * @private
  */
 function _initOngletHistorique_(classeur) {
-  _ecrireSheet_(classeur, '_historique', 'A1',
+  _ecrireSheet_(classeur, ONGLETS_TECHNIQUES.historique, 'A1',
     [['url_hash', 'sent_at', 'newsletter', 'url', 'title']]);
 }
 
@@ -102,7 +102,7 @@ function _initOngletHistorique_(classeur) {
  * @private
  */
 function _initOngletLogs_(classeur) {
-  _ecrireSheet_(classeur, '_logs', 'A1',
+  _ecrireSheet_(classeur, ONGLETS_TECHNIQUES.logs, 'A1',
     [['timestamp', 'newsletter', 'nb_collectes', 'nb_pre_filtres', 'nb_scores',
       'nb_envoyes', 'duree_sec', 'statut', 'message']]);
 }
