@@ -136,3 +136,65 @@ Format : `Active | Email | Nom`. Adresses professionnelles internes BIOXA
 | Active | Email | Nom |
 |---|---|---|
 | `TRUE` | *(email pro interne)* | `Prénom Nom` |
+
+---
+
+## Décisions implicites de l'incrément 2 (collecte + déduplication)
+
+### Canonicalisation d'URL (pour le hash de dédup)
+Apps Script V8 **n'a pas de `new URL()`** → parsing manuel. La canonicalisation
+s'applique à une copie ; le champ `url` affiché reste l'original (lien source).
+- **Scheme + host en minuscule uniquement** ; path et query **conservés en casse**.
+- **`www.`** de tête retiré ; **port par défaut** (`:80` http, `:443` https) retiré.
+- **Trailing slash** retiré du path (`/a/` → `/a` ; racine `/` → vide).
+- **Fragment `#…`** retiré.
+- **Paramètres retirés** : préfixe **`utm_`** + **`fbclid`, `gclid`, `mc_cid`, `mc_eid`, `ref`**. Tous les autres conservés.
+- **Paramètres restants triés alphabétiquement** (sinon `?a=1&b=2` ≠ `?b=2&a=1`).
+- Hash : **SHA-256 hex** de la forme canonique.
+
+### Item normalisé (contrat incr. 3/4/5)
+`{ titre, url, source, rubrique, datePublication: Date|null, resumeBrut, urlHash: string|null }`
+- `rubrique` portée **dès la collecte** ; `datePublication` en **`Date` natif** ;
+  `resumeBrut` = description/summary HTML strippé, tronqué à **1000 car** ;
+  `urlHash` renseigné par `dedoublonner()`.
+
+### Collecte / fenêtre / filtres
+- **Filter keywords** appliqué **à la collecte**, sur **titre + résumé**, sémantique **OR**.
+  (Complémentaire du pré-filtre IA, qui n'est jamais bypassé.)
+- **Fenêtre** = `now − 7 j` (hebdo) / `now − 30 j` (mensuel), glissante (pas « depuis dernier run »).
+- **`pubDate` absente → item inclus** (tolérant) + compteur. Garde-fou : si **> 30 %**
+  des items d'une source sont sans date → warning nominatif « candidat à investigation parsing ».
+- **Dédup intra-run** : premier rencontré gagne (ordre des sources puis du flux).
+- **Échec partiel** : jamais d'abort en collecte ; warning fort si **> 50 %** sources HS ;
+  drapeau `santeCollecte` dans le retour (mail admin à l'incr. 5/8).
+- **Repli séquentiel** (si `fetchAll` lève) borné à **5 min** ; sources restantes
+  marquées `timeout cumulé`.
+
+---
+
+## Écarts au PRD (incrément 2)
+
+1. **Canonical lowercase host+scheme seulement** (le PRD §6.2 dit « lowercase »
+   sans préciser) — lowercaser le path/query fusionnerait des ressources
+   distinctes. Comportement RFC-correct.
+2. **Tri alphabétique des query params** (non mentionné au PRD) — indispensable,
+   sinon deux URL équivalentes échappent à la dédup.
+3. **Liste de params strippés étendue** au-delà de `utm_*` : `fbclid`, `gclid`,
+   `mc_cid`, `mc_eid`, `ref` (trackers fréquents sur les RSS de newsletters).
+4. **Timeout 30 s/requête non tenable** : `UrlFetchApp` n'expose pas de timeout
+   par requête (défaut plateforme ~60 s, non réglable). Mitigation : cap 6 min
+   Apps Script + chunking + budget 5 min sur le repli séquentiel.
+
+---
+
+## Limitations connues (incrément 2)
+
+- **`XmlService` est strict** : un flux XML malformé fait échouer le parsing →
+  la source est **ignorée et loggée** (pas de parseur tolérant maison).
+- **Formats de date exotiques non gérés** : seuls RFC 822 (RSS) et ISO 8601
+  (Atom), parsés nativement par V8, sont fiables. Tout autre format → date `null`
+  → item **inclus** (cf. garde-fou 30 %).
+- **RSS 1.0 (RDF) supporté** via correspondance par nom local d'élément
+  (namespace-agnostique), mais **peu testé** faute de runtime local — à valider
+  si une source RDF est rencontrée au pilote.
+- **Pas de timeout par requête** (cf. écart #4).

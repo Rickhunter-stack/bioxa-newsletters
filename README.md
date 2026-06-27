@@ -18,9 +18,11 @@ Le pipeline (collecte → pré-filtre → scoring → rendu → envoi) arrive au
 | Fichier | Rôle |
 |---|---|
 | `Code.gs` | Entry points par newsletter (`executerNewsletterDSI`) + `executerNewsletter(id)` + constantes |
-| `src_config.gs` | `lireConfig(idNewsletter)` — **unique point de lecture de la Sheet** |
+| `src_config.gs` | `lireConfig(idNewsletter)` + `_lireColonneOnglet_` — **lectures Sheet centralisées** |
 | `src_init.gs` | `initialiserSheetDeConfig()` — crée les onglets manquants (idempotent) ; `_ecrireSheet_` = unique point d'écriture |
-| `src_test.gs` | Tests manuels (`testerInitialiserSheet`, `testerLireConfig`) |
+| `src_collecte.gs` | `collecterItems(idNewsletter, config)` — collecte RSS/Atom parallèle (PRD M1) |
+| `src_dedup.gs` | `dedoublonner(items, idNewsletter)` — dédup par hash d'URL vs `_historique` (PRD M2) |
+| `src_test.gs` | Tests manuels (`testerInitialiserSheet`, `testerLireConfig`, `testerCanonicaliserUrl`, `testerCollecte`, `testerCollecteEtDedup`) |
 | `appsscript.json` | Manifest (timezone Europe/Paris, runtime V8) |
 | `DECISIONS.md` | Décisions implicites (clés exactes, tokens, formats) + exemples de remplissage DSI |
 
@@ -103,6 +105,11 @@ sauf si la Sheet ou l'onglet de la newsletter est totalement introuvable.
 4. (Optionnel) remplir l'onglet `DSI` avec les exemples de `DECISIONS.md`.
 5. Exécuter **`testerLireConfig`** et lire « Journaux d'exécution » : la config DSI
    s'affiche en JSON + contrôles rapides.
+6. **`testerCanonicaliserUrl`** : test offline (sans réseau) de la canonicalisation
+   d'URL + hash de déduplication.
+7. **`testerCollecte`** / **`testerCollecteEtDedup`** : collecte RSS réelle des
+   sources DSI (réseau requis) ; logge items par rubrique, sources HS et compteurs
+   de déduplication.
 
 ## Secrets
 

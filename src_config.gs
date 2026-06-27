@@ -121,6 +121,50 @@ function _ouvrirSheetConfig_() {
 }
 
 /**
+ * Lecteur générique : retourne les valeurs d'une colonne (repérée par son
+ * en-tête en ligne 1) d'un onglet quelconque. Point d'accès unifié en lecture
+ * réutilisé par src_dedup (incr. 2) et l'observabilité (_logs/_historique, incr. 5+).
+ * Onglet ou colonne absent(e) → [] + warning (jamais d'exception).
+ *
+ * @param {string} nomOnglet Nom de l'onglet.
+ * @param {string} nomColonne En-tête de colonne (insensible à la casse).
+ * @return {Array.<*>} Valeurs de la colonne (hors en-tête), ordre de la feuille.
+ */
+function _lireColonneOnglet_(nomOnglet, nomColonne) {
+  var onglet = _ouvrirSheetConfig_().getSheetByName(nomOnglet);
+  if (!onglet) {
+    Logger.log('[lecture][WARN] Onglet "%s" absent — colonne "%s" non lue.', nomOnglet, nomColonne);
+    return [];
+  }
+  var dernLigne = onglet.getLastRow();
+  var dernCol = onglet.getLastColumn();
+  if (dernLigne < 1 || dernCol < 1) {
+    return [];
+  }
+  var entetes = onglet.getRange(1, 1, 1, dernCol).getValues()[0];
+  var idx = -1;
+  for (var c = 0; c < entetes.length; c++) {
+    if (_texte_(entetes[c]).toLowerCase() === _texte_(nomColonne).toLowerCase()) {
+      idx = c;
+      break;
+    }
+  }
+  if (idx === -1) {
+    Logger.log('[lecture][WARN] Colonne "%s" introuvable dans "%s".', nomColonne, nomOnglet);
+    return [];
+  }
+  if (dernLigne < 2) {
+    return [];
+  }
+  var valeurs = onglet.getRange(2, idx + 1, dernLigne - 1, 1).getValues();
+  var sortie = [];
+  for (var r = 0; r < valeurs.length; r++) {
+    sortie.push(valeurs[r][0]);
+  }
+  return sortie;
+}
+
+/**
  * Lit l'onglet `_config` global (clé/valeur) avec valeurs par défaut + typage.
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} classeur
  * @return {{claudeModel: string, claudeApiEndpoint: string, gmailQuotaJour: number,

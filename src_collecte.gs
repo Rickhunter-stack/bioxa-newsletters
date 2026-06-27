@@ -1,0 +1,444 @@
+/**
+ * src_collecte.gs — Collecte parallèle des flux RSS/Atom (PRD M1).
+ *
+ * `collecterItems(idNewsletter, config)` récupère les sources actives via
+ * UrlFetchApp.fetchAll(), parse RSS 2.0 / Atom / RSS 1.0 (RDF) via XmlService,
+ * normalise les items, applique la fenêtre temporelle et le filtre keywords,
+ * et remonte les échecs de sources sans jamais interrompre le run.
+ *
+ * Le titre est conservé VERBATIM (règle métier). Le lien reste l'URL originale.
+ * Aucun appel Claude ici (incr. 3). Aucune écriture Sheet ici (incr. 5).
+ */
+
+/** Fenêtre temporelle (jours) selon la cadence. */
+var FENETRE_JOURS_HEBDO = 7;
+var FENETRE_JOURS_MENSUEL = 30;
+
+/** Nombre max d'URL par appel fetchAll (limite Apps Script). */
+var MAX_SOURCES_PAR_LOT = 100;
+
+/** Longueur max du résumé brut conservé (borne la charge envoyée à Claude). */
+var RESUME_BRUT_MAX = 1000;
+
+/** Budget temps total des fetch en repli séquentiel (sous le cap 6 min). */
+var BUDGET_FETCH_MS = 5 * 60 * 1000;
+
+/** Seuil de sources HS au-delà duquel on logge une collecte dégradée. */
+var SEUIL_HS_RATIO = 0.5;
+
+/** Seuil d'items sans date par source signalant un souci de parsing. */
+var SEUIL_SANS_DATE_SOURCE = 0.3;
+
+/**
+ * Collecte les items des sources actives d'une newsletter.
+ *
+ * @param {string} idNewsletter Identifiant de la newsletter (pour les logs).
+ * @param {Object} config Config issue de lireConfig (sources, cadence…).
+ * @return {{
+ *   items: Array.<Object>,
+ *   echecs: Array.<{source: string, rubrique: string, url: string, raison: string}>,
+ *   statsParRubrique: !Object.<string, {sourcesOk: number, sourcesHs: number, items: number}>,
+ *   santeCollecte: {sourcesTotal: number, sourcesOk: number, sourcesHs: number, ratioHs: number},
+ *   sourcesSansDate: Array.<{source: string, ratioSansDate: number, sansDate: number, total: number}>
+ * }} Résultat de collecte (items normalisés + diagnostic).
+ */
+function collecterItems(idNewsletter, config) {
+  var debutFetch = (new Date()).getTime();
+  var cadence = (config && config.cadence) ? config.cadence : 'hebdo';
+  var sourcesActives = ((config && config.sources) || []).filter(function(s) {
+    return s.active;
+  });
+
+  var echecs = [];
+  var stats = {};
+  var sourcesSansDate = [];
+
+  function statRubrique(rubrique) {
+    if (!stats[rubrique]) {
+      stats[rubrique] = { sourcesOk: 0, sourcesHs: 0, items: 0 };
+    }
+    return stats[rubrique];
+  }
+  function marquerHs(source, raison) {
+    echecs.push({
+      source: source.nomSource, rubrique: source.rubrique,
+      url: source.urlRss, raison: raison
+    });
+    statRubrique(source.rubrique).sourcesHs++;
+    Logger.log('[collecte][WARN] Source HS "%s" (%s) : %s', source.nomSource, source.rubrique, raison);
+  }
+
+  // Sources à URL vide : échec immédiat, non envoyées au fetch.
+  var aFetcher = [];
+  sourcesActives.forEach(function(s) {
+    if (_texte_(s.urlRss) === '') {
+      marquerHs(s, 'URL RSS vide');
+    } else {
+      aFetcher.push(s);
+    }
+  });
+
+  var reponses = _recupererFlux_(aFetcher, debutFetch);
+
+  var items = [];
+  reponses.forEach(function(rep) {
+    var s = rep.source;
+    if (rep.erreur) { marquerHs(s, rep.erreur); return; }
+    if (rep.code < 200 || rep.code > 299) { marquerHs(s, 'HTTP ' + rep.code); return; }
+    var corps = _texte_(rep.body);
+    if (corps === '') { marquerHs(s, 'corps vide'); return; }
+
+    var bruts;
+    try {
+      bruts = _parserFlux_(corps, s);
+    } catch (e) {
+      Logger.log('[collecte][ERREUR] Parsing "%s" : %s', s.nomSource, e.message);
+      marquerHs(s, 'réponse non-XML/illisible');
+      return;
+    }
+
+    var total = 0;
+    var sansDate = 0;
+    var gardes = [];
+    bruts.forEach(function(brut) {
+      var item = _normaliserItem_(brut, s);
+      total++;
+      if (item.datePublication === null) { sansDate++; }
+      if (_dansLaFenetre_(item.datePublication, cadence)) {
+        gardes.push(item);
+      }
+    });
+    gardes = _appliquerFiltreKeywords_(gardes, s.filterKeywords);
+
+    items = items.concat(gardes);
+    statRubrique(s.rubrique).sourcesOk++;
+    statRubrique(s.rubrique).items += gardes.length;
+
+    // Garde-fou parsing date : > 30 % d'items sans date pour cette source.
+    if (total > 0 && (sansDate / total) > SEUIL_SANS_DATE_SOURCE) {
+      Logger.log('[collecte][WARN] Source "%s" : %s/%s items sans date (%s%%) — candidat à investigation parsing.',
+        s.nomSource, sansDate, total, Math.round(sansDate / total * 100));
+      sourcesSansDate.push({
+        source: s.nomSource, ratioSansDate: sansDate / total,
+        sansDate: sansDate, total: total
+      });
+    }
+  });
+
+  var sourcesTotal = sourcesActives.length;
+  var sourcesHs = echecs.length;
+  var sourcesOk = sourcesTotal - sourcesHs;
+  var ratioHs = sourcesTotal > 0 ? sourcesHs / sourcesTotal : 0;
+  if (ratioHs > SEUIL_HS_RATIO) {
+    Logger.log('[collecte][WARN] %s : collecte dégradée — %s/%s sources HS (%s%%).',
+      idNewsletter, sourcesHs, sourcesTotal, Math.round(ratioHs * 100));
+  }
+  Logger.log('[collecte] %s : %s items collectés, %s/%s sources OK.',
+    idNewsletter, items.length, sourcesOk, sourcesTotal);
+
+  return {
+    items: items,
+    echecs: echecs,
+    statsParRubrique: stats,
+    santeCollecte: {
+      sourcesTotal: sourcesTotal, sourcesOk: sourcesOk,
+      sourcesHs: sourcesHs, ratioHs: ratioHs
+    },
+    sourcesSansDate: sourcesSansDate
+  };
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Récupération réseau.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Récupère les flux par lots de fetchAll, avec repli séquentiel borné en temps.
+ * @param {Array.<Object>} sources Sources (avec urlRss non vide).
+ * @param {number} debutFetch Timestamp (ms) de début de phase fetch.
+ * @return {Array.<{source: Object, code: number, body: string, erreur: ?string}>}
+ * @private
+ */
+function _recupererFlux_(sources, debutFetch) {
+  var resultats = [];
+  for (var i = 0; i < sources.length; i += MAX_SOURCES_PAR_LOT) {
+    var lot = sources.slice(i, i + MAX_SOURCES_PAR_LOT);
+    var requetes = lot.map(function(s) {
+      return { url: s.urlRss, muteHttpExceptions: true, followRedirects: true };
+    });
+    var reponses;
+    try {
+      reponses = UrlFetchApp.fetchAll(requetes);
+    } catch (eLot) {
+      Logger.log('[collecte][WARN] fetchAll a échoué sur un lot de %s — repli séquentiel : %s',
+        lot.length, eLot.message);
+      _fetchSequentiel_(lot, debutFetch, resultats);
+      continue;
+    }
+    for (var j = 0; j < lot.length; j++) {
+      try {
+        resultats.push({
+          source: lot[j], code: reponses[j].getResponseCode(),
+          body: reponses[j].getContentText(), erreur: null
+        });
+      } catch (eRep) {
+        resultats.push({ source: lot[j], code: 0, body: '', erreur: 'lecture réponse : ' + eRep.message });
+      }
+    }
+  }
+  return resultats;
+}
+
+/**
+ * Repli séquentiel source par source, borné par BUDGET_FETCH_MS. Au-delà du
+ * budget, les sources restantes sont marquées "timeout cumulé".
+ * @param {Array.<Object>} lot
+ * @param {number} debutFetch
+ * @param {Array} resultats Accumulateur (muté).
+ * @return {void}
+ * @private
+ */
+function _fetchSequentiel_(lot, debutFetch, resultats) {
+  for (var k = 0; k < lot.length; k++) {
+    if ((new Date()).getTime() - debutFetch > BUDGET_FETCH_MS) {
+      for (var m = k; m < lot.length; m++) {
+        resultats.push({ source: lot[m], code: 0, body: '', erreur: 'timeout cumulé' });
+      }
+      Logger.log('[collecte][WARN] Budget fetch (%s min) dépassé — %s source(s) non traitée(s).',
+        BUDGET_FETCH_MS / 60000, lot.length - k);
+      return;
+    }
+    var s = lot[k];
+    try {
+      var rep = UrlFetchApp.fetch(s.urlRss, { muteHttpExceptions: true, followRedirects: true });
+      resultats.push({ source: s, code: rep.getResponseCode(), body: rep.getContentText(), erreur: null });
+    } catch (e) {
+      resultats.push({ source: s, code: 0, body: '', erreur: 'fetch : ' + e.message });
+    }
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Parsing XML (RSS 2.0 / Atom / RSS 1.0 RDF), par nom local (namespace-agnostique).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Parse un flux et retourne des items bruts (champs texte non normalisés).
+ * @param {string} corps Corps XML.
+ * @param {Object} source Source d'origine (pour contexte).
+ * @return {Array.<{titre: string, url: string, dateCandidates: Array.<string>, resume: string}>}
+ * @throws {Error} Si XmlService ne peut pas parser (flux malformé).
+ * @private
+ */
+function _parserFlux_(corps, source) {
+  var racine = XmlService.parse(corps).getRootElement();
+  var nomRacine = racine.getName();
+  var bruts = [];
+
+  if (nomRacine === 'feed') { // Atom
+    _collecterParNomLocal_(racine, 'entry').forEach(function(e) {
+      bruts.push({
+        titre: _texteEnfantLocal_(e, 'title'),
+        url: _lienAtom_(e),
+        dateCandidates: [_texteEnfantLocal_(e, 'published'), _texteEnfantLocal_(e, 'updated'),
+          _texteEnfantLocal_(e, 'date')],
+        resume: _texteEnfantLocal_(e, 'summary') || _texteEnfantLocal_(e, 'content')
+      });
+    });
+  } else { // RSS 2.0 ('rss') ou RSS 1.0 RDF ('RDF')
+    _collecterParNomLocal_(racine, 'item').forEach(function(it) {
+      bruts.push({
+        titre: _texteEnfantLocal_(it, 'title'),
+        url: _lienRss_(it),
+        dateCandidates: [_texteEnfantLocal_(it, 'pubDate'), _texteEnfantLocal_(it, 'date')],
+        resume: _texteEnfantLocal_(it, 'encoded') || _texteEnfantLocal_(it, 'description')
+      });
+    });
+  }
+  return bruts;
+}
+
+/**
+ * Collecte récursivement les éléments d'un nom local donné (ignore le namespace).
+ * @param {GoogleAppsScript.XML_Service.Element} element
+ * @param {string} nomLocal
+ * @return {Array.<GoogleAppsScript.XML_Service.Element>}
+ * @private
+ */
+function _collecterParNomLocal_(element, nomLocal) {
+  var acc = [];
+  (function rec(el) {
+    var enfants = el.getChildren();
+    for (var i = 0; i < enfants.length; i++) {
+      if (enfants[i].getName() === nomLocal) {
+        acc.push(enfants[i]);
+      } else {
+        rec(enfants[i]);
+      }
+    }
+  })(element);
+  return acc;
+}
+
+/**
+ * Texte du premier enfant direct portant ce nom local ; '' si absent.
+ * @param {GoogleAppsScript.XML_Service.Element} element
+ * @param {string} nomLocal
+ * @return {string}
+ * @private
+ */
+function _texteEnfantLocal_(element, nomLocal) {
+  var enfants = element.getChildren();
+  for (var i = 0; i < enfants.length; i++) {
+    if (enfants[i].getName() === nomLocal) {
+      return _texte_(enfants[i].getText());
+    }
+  }
+  return '';
+}
+
+/**
+ * Lien d'un item RSS : texte de <link>, sinon attribut href (cas atom:link).
+ * @param {GoogleAppsScript.XML_Service.Element} item
+ * @return {string}
+ * @private
+ */
+function _lienRss_(item) {
+  var enfants = item.getChildren();
+  var fallbackHref = '';
+  for (var i = 0; i < enfants.length; i++) {
+    if (enfants[i].getName() === 'link') {
+      var texte = _texte_(enfants[i].getText());
+      if (texte !== '') { return texte; }
+      var href = enfants[i].getAttribute('href');
+      if (href && _texte_(href.getValue()) !== '' && fallbackHref === '') {
+        fallbackHref = _texte_(href.getValue());
+      }
+    }
+  }
+  return fallbackHref;
+}
+
+/**
+ * Lien d'une entrée Atom : href du <link rel="alternate"> (ou premier href).
+ * @param {GoogleAppsScript.XML_Service.Element} entry
+ * @return {string}
+ * @private
+ */
+function _lienAtom_(entry) {
+  var enfants = entry.getChildren();
+  var fallback = '';
+  for (var i = 0; i < enfants.length; i++) {
+    if (enfants[i].getName() === 'link') {
+      var href = enfants[i].getAttribute('href');
+      var hrefVal = href ? _texte_(href.getValue()) : '';
+      if (hrefVal === '') { continue; }
+      var rel = enfants[i].getAttribute('rel');
+      if (!rel || _texte_(rel.getValue()) === 'alternate') { return hrefVal; }
+      if (fallback === '') { fallback = hrefVal; }
+    }
+  }
+  return fallback;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Normalisation, fenêtre temporelle, filtre keywords, nettoyage.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Construit l'item normalisé (contrat incr. 3/4/5) à partir d'un item brut.
+ * @param {Object} brut
+ * @param {Object} source
+ * @return {{titre: string, url: string, source: string, rubrique: string,
+ *           datePublication: ?Date, resumeBrut: string, urlHash: ?string}}
+ * @private
+ */
+function _normaliserItem_(brut, source) {
+  return {
+    titre: _texte_(brut.titre),
+    url: _texte_(brut.url),
+    source: source.nomSource,
+    rubrique: source.rubrique,
+    datePublication: _parserDate_(brut.dateCandidates),
+    resumeBrut: _nettoyerHtml_(brut.resume),
+    urlHash: null
+  };
+}
+
+/**
+ * Parse la première date candidate lisible. RFC 822 (RSS) et ISO 8601 (Atom)
+ * sont gérés nativement par le moteur V8 ; tout le reste → null.
+ * @param {Array.<string>} candidates
+ * @return {?Date}
+ * @private
+ */
+function _parserDate_(candidates) {
+  for (var i = 0; i < candidates.length; i++) {
+    var s = _texte_(candidates[i]);
+    if (s === '') { continue; }
+    var d = new Date(s);
+    if (!isNaN(d.getTime())) { return d; }
+  }
+  return null;
+}
+
+/**
+ * Indique si une date est dans la fenêtre (now − N jours). Date null → inclus.
+ * @param {?Date} date
+ * @param {string} cadence 'hebdo' | 'mensuel'
+ * @return {boolean}
+ * @private
+ */
+function _dansLaFenetre_(date, cadence) {
+  if (date === null) { return true; }
+  var jours = (cadence === 'mensuel') ? FENETRE_JOURS_MENSUEL : FENETRE_JOURS_HEBDO;
+  var limite = (new Date()).getTime() - jours * 24 * 60 * 60 * 1000;
+  return date.getTime() >= limite;
+}
+
+/**
+ * Filtre keywords (OR) sur titre + résumé brut. Source sans keywords → tout gardé.
+ * @param {Array.<Object>} items
+ * @param {string} keywords Liste séparée par virgules/espaces.
+ * @return {Array.<Object>}
+ * @private
+ */
+function _appliquerFiltreKeywords_(items, keywords) {
+  var kws = _texte_(keywords).toLowerCase().split(/[,\s]+/).filter(function(k) {
+    return k !== '';
+  });
+  if (!kws.length) { return items; }
+  return items.filter(function(it) {
+    var foin = (it.titre + ' ' + it.resumeBrut).toLowerCase();
+    for (var i = 0; i < kws.length; i++) {
+      if (foin.indexOf(kws[i]) !== -1) { return true; }
+    }
+    return false;
+  });
+}
+
+/**
+ * Retire les balises HTML, décode les entités courantes, collapse les espaces,
+ * tronque à RESUME_BRUT_MAX. (Ne s'applique JAMAIS au titre, conservé verbatim.)
+ * @param {string} s
+ * @return {string}
+ * @private
+ */
+function _nettoyerHtml_(s) {
+  var t = _texte_(s);
+  if (t === '') { return ''; }
+  t = t.replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&apos;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (t.length > RESUME_BRUT_MAX) {
+    t = t.substring(0, RESUME_BRUT_MAX) + '…';
+  }
+  return t;
+}
