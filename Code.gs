@@ -66,7 +66,18 @@ function executerNewsletter(idNewsletter) {
     dedup.rejetesIntraRun, dedup.rejetesHistorique,
     collecte.santeCollecte.sourcesOk, collecte.santeCollecte.sourcesTotal);
 
-  // TODO incr. 3 : prefilterTitres(dedup.retenus) puis scorerEtResumer(...)
-  // TODO incr. 4 : genererHTML(config, items)
+  // Pré-filtre IA (M3) PUIS scoring + résumé (M4). En cas d'échec Claude après
+  // retries / budget dépassé, le run est annulé (mail admin : incr. 5).
+  var selection;
+  try {
+    var apresPrefilter = prefilterTitres(dedup.retenus, config);
+    selection = scorerEtResumer(apresPrefilter, config);
+  } catch (e) {
+    Logger.log('[pipeline][ERREUR] %s : pipeline Claude interrompu — run annulé : %s', idNewsletter, e.message);
+    throw e;
+  }
+  Logger.log('Pipeline "%s" : %s items sélectionnés pour le rendu.', idNewsletter, selection.length);
+
+  // TODO incr. 4 : genererHTML(config, selection)
   // TODO incr. 5 : envoyerGmail(config, html) + logRun(...) + écriture _historique
 }

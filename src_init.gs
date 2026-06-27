@@ -77,7 +77,9 @@ function _initOngletConfig_(classeur) {
     ['claude_api_endpoint', CONFIG_GLOBALE_DEFAUTS.claude_api_endpoint],
     ['gmail_quota_jour', CONFIG_GLOBALE_DEFAUTS.gmail_quota_jour],
     ['admin_email', ''],
-    ['dry_run_global', CONFIG_GLOBALE_DEFAUTS.dry_run_global]
+    ['dry_run_global', CONFIG_GLOBALE_DEFAUTS.dry_run_global],
+    ['prix_input_per_million_tokens', CONFIG_GLOBALE_DEFAUTS.prix_input_per_million_tokens],
+    ['prix_output_per_million_tokens', CONFIG_GLOBALE_DEFAUTS.prix_output_per_million_tokens]
   ];
   _ecrireSheet_(classeur, ONGLET_CONFIG, 'A1', lignes, {
     notes: { 'B5': 'À renseigner : email de l\'admin (rapports, alertes). Laissé vide par l\'init.' }

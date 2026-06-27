@@ -113,3 +113,102 @@ function testerCollecteEtDedup() {
     Logger.log('Retenu %s | %s | hash=%s', i + 1, it.titre, it.urlHash);
   });
 }
+
+/**
+ * Test OFFLINE (sans réseau, sans clé API) du parsing JSONL + ré-appariement
+ * par custom_id + extraction de la sortie structurée. Reproduit le pattern de
+ * testerCanonicaliserUrl : fixtures de réponses Claude en dur.
+ * @return {void}
+ */
+function testerParseSortieClaude() {
+  var echecs = 0;
+
+  // Fixture JSONL : 2 succès (ordre inversé volontairement) + 1 en erreur.
+  var jsonl = [
+    JSON.stringify({ custom_id: 'hashB', result: { type: 'succeeded', message: {
+      content: [{ type: 'text', text: '{"score": 7, "resume_fr": "Résumé B.", "raison": "Pertinent."}' }],
+      usage: { input_tokens: 12, output_tokens: 8 }
+    } } }),
+    JSON.stringify({ custom_id: 'hashA', result: { type: 'succeeded', message: {
+      content: [{ type: 'text', text: '{"decision": "oui"}' }],
+      usage: { input_tokens: 5, output_tokens: 2 }
+    } } }),
+    JSON.stringify({ custom_id: 'hashC', result: { type: 'errored', error: { type: 'invalid_request' } } })
+  ].join('\n') + '\n';
+
+  var lignes = _parserResultatsJsonl_(jsonl);
+  if (lignes.length !== 3) { echecs++; Logger.log('FAIL: %s lignes parsées (attendu 3)', lignes.length); }
+
+  var map = _indexerResultats_(lignes);
+  // Ré-appariement par custom_id (indépendant de l'ordre).
+  if (!(map.hashA && map.hashA.ok)) { echecs++; Logger.log('FAIL: hashA absent/échec'); }
+  if (!(map.hashB && map.hashB.ok)) { echecs++; Logger.log('FAIL: hashB absent/échec'); }
+  if (!(map.hashC && map.hashC.ok === false)) { echecs++; Logger.log('FAIL: hashC devrait être en erreur'); }
+
+  // Extraction des sorties structurées.
+  var sortieA = _extraireSortie_(map.hashA.message);
+  if (!sortieA || sortieA.decision !== 'oui') { echecs++; Logger.log('FAIL: décision hashA = %s', sortieA && sortieA.decision); }
+
+  var sortieB = _extraireSortie_(map.hashB.message);
+  if (!sortieB || sortieB.score !== 7) { echecs++; Logger.log('FAIL: score hashB = %s', sortieB && sortieB.score); }
+
+  // Bornage + troncature.
+  if (_bornerScore_(99) !== 10 || _bornerScore_(-3) !== 0 || _bornerScore_('abc') !== 0) {
+    echecs++; Logger.log('FAIL: bornage score incorrect');
+  }
+  var longResume = new Array(260).join('x'); // 259 caractères
+  var tronque = _tronquerResume_(longResume, 'titre test');
+  if (tronque.length !== RESUME_MAX_CHARS + 1) { echecs++; Logger.log('FAIL: troncature = %s car', tronque.length); }
+
+  // Usage agrégé.
+  var usage = _sommerUsage_(map);
+  if (usage.inputTokens !== 17 || usage.outputTokens !== 10) {
+    echecs++; Logger.log('FAIL: usage in=%s out=%s (attendu 17/10)', usage.inputTokens, usage.outputTokens);
+  }
+
+  Logger.log('--- testerParseSortieClaude : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
+}
+
+/**
+ * Test RÉEL du pré-filtre sur la newsletter DSI (réseau + clé API requis).
+ * Pré-requis : onglet DSI rempli avec des sources actives, ANTHROPIC_API_KEY posée.
+ * @return {void}
+ */
+function testerPrefilter() {
+  var config = lireConfig('DSI');
+  var collecte = collecterItems('DSI', config);
+  var dedup = dedoublonner(collecte.items, 'DSI');
+  var conserves = prefilterTitres(dedup.retenus, config);
+  Logger.log('=== Pré-filtre DSI ===');
+  Logger.log('%s items dédupliqués → %s conservés.', dedup.retenus.length, conserves.length);
+  conserves.slice(0, 5).forEach(function(it) {
+    Logger.log('  [%s] %s', it.rubrique, it.titre);
+  });
+}
+
+/**
+ * Test RÉEL du scoring + résumé sur la newsletter DSI (réseau + clé API requis).
+ * @return {void}
+ */
+function testerScoring() {
+  var config = lireConfig('DSI');
+  var collecte = collecterItems('DSI', config);
+  var dedup = dedoublonner(collecte.items, 'DSI');
+  var conserves = prefilterTitres(dedup.retenus, config);
+  var scores = scorerEtResumer(conserves, config);
+  Logger.log('=== Scoring DSI ===');
+  Logger.log('%s items → %s sélectionnés.', conserves.length, scores.length);
+  scores.forEach(function(it) {
+    Logger.log('  [%s] score=%s | %s\n    %s', it.rubrique, it.score, it.titre, it.resumeFr);
+  });
+}
+
+/**
+ * Test RÉEL bout-en-bout (collecte → dédup → pré-filtre → scoring) sur DSI.
+ * Reproduit le scénario du PRD incr. 3 (~30 items → décisions → ~15 scorés).
+ * @return {void}
+ */
+function testerClaudeBatchBoutEnBout() {
+  executerNewsletter('DSI');
+  Logger.log('--- testerClaudeBatchBoutEnBout : voir les logs [claude] ci-dessus ---');
+}

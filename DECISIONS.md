@@ -198,3 +198,88 @@ s'applique à une copie ; le champ `url` affiché reste l'original (lien source)
   (namespace-agnostique), mais **peu testé** faute de runtime local — à valider
   si une source RDF est rencontrée au pilote.
 - **Pas de timeout par requête** (cf. écart #4).
+
+---
+
+## Décisions implicites de l'incrément 3 (appels Claude Batch)
+
+### Architecture asynchrone — Option A (poll synchrone borné)
+- `appelerClaudeBatch` crée le batch, **poll** `processing_status` jusqu'à `ended`
+  dans un **budget de 4 min**, puis lit les résultats — le tout dans **un seul run**.
+- Intervalle de poll : **10 s** (< 1 min écoulée) → **20 s** (< 2 min) → **30 s** ensuite.
+- Budget dépassé → exception → **run annulé** (mail admin : incr. 5).
+- **Bascule conditionnelle vers Option B** (machine à états sur 2 exécutions) si le
+  pilote révèle des **latences > 5 min récurrentes** (cf. HYP8 du PRD).
+
+### Granularité — Option 2 (batch de N requêtes)
+- **1 requête par item**, `custom_id = urlHash` (SHA-256 hex, 64 car → conforme
+  `^[a-zA-Z0-9_-]{1,64}$`). Résultats ré-appariés par `custom_id` (ordre non garanti).
+- Robuste aux échecs isolés ; pré-filtre sur titres seuls (levier 01 préservé),
+  **précède toujours** le scoring.
+
+### Sorties structurées (`output_config.format`)
+- **CONFIRMÉ supporté en Batches API** (doc Anthropic `batch-processing.md`, FAQ :
+  « supports nearly all features… » ; `output_config` n'est PAS dans la liste
+  d'exclusion `stream`/`speed`/`store`/`max_tokens:0`/…). Activées sur le pré-filtre
+  (`{decision: oui|non}`) et le scoring (`{score, resume_fr, raison}`).
+- **Parse défensif de repli conservé** (`_extraireSortie_` en try/catch) : une
+  garantie API n'est jamais 100 %.
+- Les contraintes numériques (`minimum`/`maximum`) ne sont **pas** supportées par
+  les structured outputs → le score est **borné [0,10] en code** (`_bornerScore_`).
+
+### Prompts
+- **Pré-filtre : en dur dans Git** (constante `PROMPT_PREFILTER_TEMPLATE` dans
+  `src_claude.gs`, versionnée `# prefilter v{date}`, `{{rubrique}}` substituée).
+- **Scoring : `config.promptSysteme`** (prompt versionné de l'onglet newsletter).
+  Absent → exception (scoring impossible).
+
+### Coût (alimente le récap admin S4, incr. 8)
+- Deux clés `_config` : `prix_input_per_million_tokens` (défaut **1**),
+  `prix_output_per_million_tokens` (défaut **5**) — **prix catalogue Haiku 4.5 en USD**
+  ($1 input / $5 output par M tokens, doc Anthropic). La **remise Batch −50 %** est
+  appliquée dans le calcul (`REMISE_BATCH = 0.5`).
+- Logué à chaque batch : `nb_items`, `tokens in/out` (réels, depuis `usage`), coût estimé.
+- *Devise* : défauts en USD ; l'admin peut saisir des valeurs en € dans `_config`
+  s'il préfère (le calcul utilise les valeurs telles quelles).
+
+### Robustesse / retries
+- Tous les appels HTTP via `_appelerAvecRetry_` : **2 retries** (backoff 2 s, 4 s) sur
+  429/5xx et erreurs réseau ; 4xx non-retryable → exception immédiate. Jamais de catch muet.
+
+### Politique sur les échecs d'item
+- **Pré-filtre en échec/illisible → item CONSERVÉ** + warning (ne pas perdre un item
+  potentiellement pertinent sur une erreur technique).
+- **Scoring en échec/illisible → item ÉCARTÉ** + warning (non scoré = non classable).
+
+---
+
+## Écarts au PRD (incrément 3)
+
+1. **« Un seul batch » et non « un seul appel HTTP »** (Option 2) — interprétation
+   fidèle à l'esprit économique des Batches ; déviation du texte littéral PRD §M3/M4
+   (« un seul appel Claude Batch ») **à corriger en v0.3 du PRD**.
+2. **Option A retenue**, bascule conditionnelle vers Option B au pilote.
+3. **Option C (`/v1/messages` synchrone) écartée** — la stack impose l'endpoint
+   Batches (CLAUDE.md + PRD §6.4).
+4. **Timeout 30 s/requête** : déjà non tenable (incr. 2) ; côté Claude, c'est le
+   **budget de poll 4 min** qui borne, pas un timeout par requête.
+
+---
+
+## Points de vigilance pour les incréments 4-5
+
+- **Latence batch ↔ budget 6 min.** Si le batch met **3+ min**, le pipeline aval
+  (rendu HTML incr. 4 + envoi Gmail incr. 5) disposera de **< 3 min** restantes dans
+  le même run. À surveiller ; déclencheur possible de la bascule Option B.
+- Le **mail admin** sur échec Claude (run annulé) est un **hook préparé** (l'exception
+  remonte) — à implémenter en incr. 5 (PRD P6).
+
+---
+
+## Limitations connues (incrément 3)
+
+- **Pas de garantie de latence Batch** (max 24 h côté Anthropic) — le budget 4 min
+  peut annuler un run ; mitigation = relance manuelle / bascule Option B.
+- **Conversion de devise non gérée** : prix `_config` utilisés tels quels (défauts USD).
+- **Score : pas de borne native** côté API (structured outputs sans contraintes
+  numériques) — borné en code.
