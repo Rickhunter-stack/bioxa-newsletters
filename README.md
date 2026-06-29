@@ -23,7 +23,9 @@ Le pipeline (collecte → pré-filtre → scoring → rendu → envoi) arrive au
 | `src_collecte.gs` | `collecterItems(idNewsletter, config)` — collecte RSS/Atom parallèle (PRD M1) |
 | `src_dedup.gs` | `dedoublonner(items, idNewsletter)` — dédup par hash d'URL vs `_historique` (PRD M2) |
 | `src_claude.gs` | `prefilterTitres` + `scorerEtResumer` via `appelerClaudeBatch` — Claude Batch (PRD M3/M4) |
-| `src_test.gs` | Tests manuels (init, lireConfig, canonicalisation, collecte, dédup, parse Claude offline, pré-filtre/scoring réels) |
+| `src_render.gs` | `genererHTML(config, items)` — rendu HTML email responsive (PRD M5/M7), pur/offline |
+| `src_envoi.gs` | `livrerNewsletter(config, html, options)` — dry-run Drive (S1) ; envoi Gmail = incr. 5 |
+| `src_test.gs` | Tests manuels (init, lireConfig, canonicalisation, collecte, dédup, parse Claude, rendu HTML offline, dry-run) |
 | `appsscript.json` | Manifest (timezone Europe/Paris, runtime V8) |
 | `DECISIONS.md` | Décisions implicites (clés exactes, tokens, formats) + exemples de remplissage DSI |
 
@@ -123,6 +125,12 @@ sauf si la Sheet ou l'onglet de la newsletter est totalement introuvable.
 10. **`testerLireTableauxColonnes`** / **`testerLocaliserTableauAmbiguite`** : tests
     **offline** de la lecture des tableaux Sources/Destinataires (non-régression du bug
     « dernière source toujours inactive » + garde-fou d'ambiguïté).
+11. **`testerEchapperHtml`** / **`testerGenererHtml`** : tests **offline** du rendu HTML
+    (échappement + fragments précis : href, `&amp;`, couleur, ordre rubriques, version prompt,
+    media query, cas 0 item).
+12. **`testerEcrireBrouillon`** (HTML fixe → Drive `_drafts`, sans coût Claude) et
+    **`testerDryRunDSI`** (`executerNewsletter('DSI', {dryRun:true})`, bout-en-bout) :
+    produisent un fichier HTML horodaté dans le dossier Drive `_drafts`.
 
 ## Secrets
 

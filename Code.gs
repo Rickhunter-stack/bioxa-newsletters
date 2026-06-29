@@ -34,6 +34,9 @@ var ONGLETS_TECHNIQUES = {
 /** Onglet de configuration globale (alias de commodité). */
 var ONGLET_CONFIG = ONGLETS_TECHNIQUES.config;
 
+/** Nom du dossier Drive où sont écrits les brouillons dry-run (PRD S1). */
+var NOM_DOSSIER_DRAFTS = '_drafts';
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Entry points par newsletter (appelés par les triggers temporels, incr. 6).
  * ────────────────────────────────────────────────────────────────────────── */
@@ -51,10 +54,12 @@ function executerNewsletterDSI() {
  * Incrément 1 : charge et logge la config ; le pipeline arrive aux incréments 2+.
  *
  * @param {string} idNewsletter Identifiant = nom de l'onglet (ex: "DSI").
+ * @param {{dryRun?: boolean}} [options] Options d'exécution (dry-run S1).
  * @return {void}
  * @throws {Error} Si la Sheet ou l'onglet de la newsletter est introuvable.
  */
-function executerNewsletter(idNewsletter) {
+function executerNewsletter(idNewsletter, options) {
+  options = options || {};
   var config = lireConfig(idNewsletter);
   Logger.log('Config chargée pour la newsletter "%s" (%s sources, %s destinataires).',
     config.id, config.sources.length, config.destinataires.length);
@@ -78,6 +83,18 @@ function executerNewsletter(idNewsletter) {
   }
   Logger.log('Pipeline "%s" : %s items sélectionnés pour le rendu.', idNewsletter, selection.length);
 
-  // TODO incr. 4 : genererHTML(config, selection)
-  // TODO incr. 5 : envoyerGmail(config, html) + logRun(...) + écriture _historique
+  // 0 item : on logge et on s'arrête. HOOK incr. 5 : déclencher un mail admin
+  // « newsletter X : 0 item cette semaine — sources à investiguer ».
+  if (!selection.length) {
+    Logger.log('[pipeline] %s : 0 item sélectionné — rien produit (hook mail admin : incr. 5).', idNewsletter);
+    return;
+  }
+
+  // Rendu HTML (M5/M7) puis livraison (dry-run S1 ; envoi réel : incr. 5).
+  var html = genererHTML(config, selection);
+  var livraison = livrerNewsletter(config, html, options);
+  Logger.log('Pipeline "%s" : livraison [%s]%s.', idNewsletter, livraison.mode,
+    livraison.url ? ' ' + livraison.url : '');
+
+  // TODO incr. 5 : envoi Gmail réel + logRun(...) + écriture _historique + mail admin
 }
