@@ -84,11 +84,12 @@ var FORMAT_SCORING = {
  *
  * @param {Array.<Object>} items Items dédupliqués (urlHash renseigné).
  * @param {Object} config Config (lireConfig) — global.claudeModel, etc.
- * @return {Array.<Object>} Items conservés.
+ * @return {{items: Array.<Object>, usage: {inputTokens: number, outputTokens: number}}}
+ *   Items conservés + usage tokens du batch (pour l'estimation de coût, incr. 5).
  */
 function prefilterTitres(items, config) {
   if (!items || !items.length) {
-    return [];
+    return { items: [], usage: { inputTokens: 0, outputTokens: 0 } };
   }
   var requetes = [];
   items.forEach(function(item) {
@@ -131,7 +132,7 @@ function prefilterTitres(items, config) {
   });
 
   Logger.log('[claude] Pré-filtre : %s/%s items conservés.', conserves.length, items.length);
-  return conserves;
+  return { items: conserves, usage: sortie.usage };
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -145,7 +146,8 @@ function prefilterTitres(items, config) {
  *
  * @param {Array.<Object>} items Items ayant passé le pré-filtre.
  * @param {Object} config Config (lireConfig) — promptSysteme requis.
- * @return {Array.<Object>} Items enrichis (score, resumeFr, raison), top N/rubrique.
+ * @return {{items: Array.<Object>, usage: {inputTokens: number, outputTokens: number}}}
+ *   Items enrichis (score, resumeFr, raison) top N/rubrique + usage tokens du batch.
  * @throws {Error} Si config.promptSysteme est absent (scoring impossible).
  */
 function scorerEtResumer(items, config) {
@@ -153,7 +155,7 @@ function scorerEtResumer(items, config) {
     throw new Error('scorerEtResumer : prompt système absent (onglet newsletter) — scoring impossible.');
   }
   if (!items || !items.length) {
-    return [];
+    return { items: [], usage: { inputTokens: 0, outputTokens: 0 } };
   }
 
   var requetes = [];
@@ -201,7 +203,7 @@ function scorerEtResumer(items, config) {
   var selection = _selectionnerTopParRubrique_(scores, config.nItemsParRubrique);
   Logger.log('[claude] Scoring : %s items scorés, %s sélectionnés (top %s/rubrique).',
     scores.length, selection.length, config.nItemsParRubrique);
-  return selection;
+  return { items: selection, usage: sortie.usage };
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -535,8 +537,32 @@ function _sommerUsage_(resultats) {
 }
 
 /**
- * Logge l'estimation de coût (alimente le récap admin S4, incr. 8).
- * Prix lus depuis _config ; remise Batch −50 % appliquée.
+ * Calcule le coût estimé d'un usage tokens (prix _config, remise Batch −50 %).
+ * @param {{inputTokens: number, outputTokens: number}} usage
+ * @param {Object} config
+ * @return {number} Coût estimé (devise des prix _config, défaut USD).
+ */
+function _calculerCout_(usage, config) {
+  var pIn = config.global.prixInputParMillion;
+  var pOut = config.global.prixOutputParMillion;
+  return (usage.inputTokens / 1e6 * pIn + usage.outputTokens / 1e6 * pOut) * REMISE_BATCH;
+}
+
+/**
+ * Additionne deux usages tokens.
+ * @param {{inputTokens: number, outputTokens: number}} a
+ * @param {{inputTokens: number, outputTokens: number}} b
+ * @return {{inputTokens: number, outputTokens: number}}
+ */
+function _additionnerUsage_(a, b) {
+  return {
+    inputTokens: (a.inputTokens || 0) + (b.inputTokens || 0),
+    outputTokens: (a.outputTokens || 0) + (b.outputTokens || 0)
+  };
+}
+
+/**
+ * Logge l'estimation de coût (alimente le récap admin S4).
  * @param {string} etiquette
  * @param {number} nbItems
  * @param {{inputTokens: number, outputTokens: number}} usage
@@ -545,9 +571,8 @@ function _sommerUsage_(resultats) {
  * @private
  */
 function _loggerCout_(etiquette, nbItems, usage, config) {
-  var pIn = config.global.prixInputParMillion;
-  var pOut = config.global.prixOutputParMillion;
-  var cout = (usage.inputTokens / 1e6 * pIn + usage.outputTokens / 1e6 * pOut) * REMISE_BATCH;
+  var cout = _calculerCout_(usage, config);
   Logger.log('[claude][cout] %s : %s items | tokens in=%s out=%s | coût estimé=%s (prix %s/%s par M, remise batch %s).',
-    etiquette, nbItems, usage.inputTokens, usage.outputTokens, cout.toFixed(4), pIn, pOut, REMISE_BATCH);
+    etiquette, nbItems, usage.inputTokens, usage.outputTokens, cout.toFixed(4),
+    config.global.prixInputParMillion, config.global.prixOutputParMillion, REMISE_BATCH);
 }

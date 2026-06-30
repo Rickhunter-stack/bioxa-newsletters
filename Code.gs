@@ -37,6 +37,12 @@ var ONGLET_CONFIG = ONGLETS_TECHNIQUES.config;
 /** Nom du dossier Drive où sont écrits les brouillons dry-run (PRD S1). */
 var NOM_DOSSIER_DRAFTS = '_drafts';
 
+/** Nom d'affichage de l'expéditeur des emails (M6). */
+var NOM_EXPEDITEUR = 'BIOXA Veille';
+
+/** Quota Gmail journalier par défaut si absent de _config (compte gratuit). */
+var GMAIL_QUOTA_DEFAUT = 100;
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Entry points par newsletter (appelés par les triggers temporels, incr. 6).
  * ────────────────────────────────────────────────────────────────────────── */
@@ -50,51 +56,91 @@ function executerNewsletterDSI() {
 }
 
 /**
- * Orchestrateur unique paramétré par newsletter (PRD P3).
- * Incrément 1 : charge et logge la config ; le pipeline arrive aux incréments 2+.
+ * Orchestrateur unique paramétré par newsletter (PRD P3) : collecte → dédup →
+ * pré-filtre → scoring → rendu → livraison, avec persistance `_historique`/`_logs`
+ * et alertes admin. Une ligne `_logs` est TOUJOURS écrite (succès, vide, erreur).
  *
  * @param {string} idNewsletter Identifiant = nom de l'onglet (ex: "DSI").
  * @param {{dryRun?: boolean}} [options] Options d'exécution (dry-run S1).
  * @return {void}
- * @throws {Error} Si la Sheet ou l'onglet de la newsletter est introuvable.
  */
 function executerNewsletter(idNewsletter, options) {
   options = options || {};
-  var config = lireConfig(idNewsletter);
-  Logger.log('Config chargée pour la newsletter "%s" (%s sources, %s destinataires).',
-    config.id, config.sources.length, config.destinataires.length);
+  var debut = (new Date()).getTime();
+  var config = null;
+  var compteurs = {
+    nbCollectes: 0, nbPreFiltres: 0, nbScores: 0, nbEnvoyes: 0,
+    dureeSec: 0, statut: 'ERREUR', message: '', coutEstime: 0
+  };
 
-  var collecte = collecterItems(idNewsletter, config);
-  var dedup = dedoublonner(collecte.items, idNewsletter);
-  Logger.log('Pipeline "%s" : %s collectés → %s uniques (%s intra-run, %s historique) ; %s/%s sources OK.',
-    idNewsletter, collecte.items.length, dedup.retenus.length,
-    dedup.rejetesIntraRun, dedup.rejetesHistorique,
-    collecte.santeCollecte.sourcesOk, collecte.santeCollecte.sourcesTotal);
-
-  // Pré-filtre IA (M3) PUIS scoring + résumé (M4). En cas d'échec Claude après
-  // retries / budget dépassé, le run est annulé (mail admin : incr. 5).
-  var selection;
   try {
-    var apresPrefilter = prefilterTitres(dedup.retenus, config);
-    selection = scorerEtResumer(apresPrefilter, config);
+    config = lireConfig(idNewsletter);
+    var dryRun = options.dryRun || (config.global && config.global.dryRunGlobal);
+    Logger.log('Config chargée pour "%s" (%s sources, %s destinataires)%s.',
+      config.id, config.sources.length, config.destinataires.length, dryRun ? ' [DRY-RUN]' : '');
+
+    var collecte = collecterItems(idNewsletter, config);
+    var dedup = dedoublonner(collecte.items, idNewsletter);
+    compteurs.nbCollectes = collecte.items.length;
+
+    // Pré-filtre IA (M3) PUIS scoring + résumé (M4).
+    var pre = prefilterTitres(dedup.retenus, config);
+    compteurs.nbPreFiltres = pre.items.length;
+    var sco = scorerEtResumer(pre.items, config);
+    compteurs.nbScores = sco.items.length;
+    compteurs.coutEstime = _calculerCout_(_additionnerUsage_(pre.usage, sco.usage), config);
+    var selection = sco.items;
+
+    // 0 item : log + (en mode réel) mail admin « sources à investiguer ».
+    if (!selection.length) {
+      compteurs.statut = dryRun ? 'DRY-RUN' : 'VIDE';
+      compteurs.message = '0 item sélectionné';
+      Logger.log('[pipeline] %s : 0 item sélectionné — rien produit.', idNewsletter);
+      if (!dryRun) {
+        envoyerMailAdmin(config, '[BIOXA] ' + idNewsletter + ' : 0 item cette semaine',
+          'Aucun item sélectionné cette semaine.\nSources HS : ' + collecte.santeCollecte.sourcesHs +
+          '/' + collecte.santeCollecte.sourcesTotal + '.\nSources à investiguer.');
+      }
+      return;
+    }
+
+    // Rendu HTML (M5/M7) puis livraison (dry-run S1 ou envoi Gmail M6).
+    var html = genererHTML(config, selection);
+    var livraison = livrerNewsletter(config, html, options);
+
+    if (livraison.mode === 'dry-run') {
+      compteurs.statut = 'DRY-RUN';
+      compteurs.message = 'brouillon : ' + livraison.url;
+    } else {
+      compteurs.nbEnvoyes = livraison.envoyes;
+      // _historique (P4) écrit si ≥ 1 destinataire servi (items réellement délivrés).
+      if (livraison.envoyes > 0) {
+        ecrireHistorique(idNewsletter, selection);
+      }
+      var nbEchecs = livraison.echecs.length;
+      compteurs.statut = (livraison.quotaAtteint || nbEchecs > 0) ? 'PARTIEL' : 'OK';
+      compteurs.message = 'envoyés=' + livraison.envoyes +
+        (nbEchecs ? ', échecs=' + nbEchecs : '') + (livraison.quotaAtteint ? ', quota atteint' : '');
+      if (livraison.quotaAtteint) {
+        envoyerMailAdmin(config, '[BIOXA] ' + idNewsletter + ' : quota Gmail atteint',
+          'Quota journalier atteint en cours d\'envoi. Envoyés=' + livraison.envoyes +
+          '. Destinataires restants non servis ce jour.');
+      }
+    }
+    Logger.log('Pipeline "%s" : [%s] %s.', idNewsletter, compteurs.statut, compteurs.message);
   } catch (e) {
-    Logger.log('[pipeline][ERREUR] %s : pipeline Claude interrompu — run annulé : %s', idNewsletter, e.message);
-    throw e;
+    compteurs.statut = 'ERREUR';
+    compteurs.message = e.message;
+    Logger.log('[pipeline][ERREUR] %s : run annulé : %s', idNewsletter, e.message);
+    if (config) {
+      envoyerMailAdmin(config, '[BIOXA] ' + idNewsletter + ' : échec du run', 'Run annulé : ' + e.message);
+    }
+  } finally {
+    compteurs.dureeSec = Math.round(((new Date()).getTime() - debut) / 1000);
+    try {
+      logRun(idNewsletter, compteurs);
+    } catch (eLog) {
+      Logger.log('[pipeline][WARN] %s : écriture _logs impossible : %s', idNewsletter, eLog.message);
+    }
   }
-  Logger.log('Pipeline "%s" : %s items sélectionnés pour le rendu.', idNewsletter, selection.length);
-
-  // 0 item : on logge et on s'arrête. HOOK incr. 5 : déclencher un mail admin
-  // « newsletter X : 0 item cette semaine — sources à investiguer ».
-  if (!selection.length) {
-    Logger.log('[pipeline] %s : 0 item sélectionné — rien produit (hook mail admin : incr. 5).', idNewsletter);
-    return;
-  }
-
-  // Rendu HTML (M5/M7) puis livraison (dry-run S1 ; envoi réel : incr. 5).
-  var html = genererHTML(config, selection);
-  var livraison = livrerNewsletter(config, html, options);
-  Logger.log('Pipeline "%s" : livraison [%s]%s.', idNewsletter, livraison.mode,
-    livraison.url ? ' ' + livraison.url : '');
-
-  // TODO incr. 5 : envoi Gmail réel + logRun(...) + écriture _historique + mail admin
 }

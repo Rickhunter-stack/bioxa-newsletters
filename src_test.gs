@@ -244,7 +244,7 @@ function testerPrefilter() {
   var config = lireConfig('DSI');
   var collecte = collecterItems('DSI', config);
   var dedup = dedoublonner(collecte.items, 'DSI');
-  var conserves = prefilterTitres(dedup.retenus, config);
+  var conserves = prefilterTitres(dedup.retenus, config).items;
   Logger.log('=== Pré-filtre DSI ===');
   Logger.log('%s items dédupliqués → %s conservés.', dedup.retenus.length, conserves.length);
   conserves.slice(0, 5).forEach(function(it) {
@@ -260,8 +260,8 @@ function testerScoring() {
   var config = lireConfig('DSI');
   var collecte = collecterItems('DSI', config);
   var dedup = dedoublonner(collecte.items, 'DSI');
-  var conserves = prefilterTitres(dedup.retenus, config);
-  var scores = scorerEtResumer(conserves, config);
+  var conserves = prefilterTitres(dedup.retenus, config).items;
+  var scores = scorerEtResumer(conserves, config).items;
   Logger.log('=== Scoring DSI ===');
   Logger.log('%s items → %s sélectionnés.', conserves.length, scores.length);
   scores.forEach(function(it) {
@@ -363,4 +363,67 @@ function testerEcrireBrouillon() {
 function testerDryRunDSI() {
   executerNewsletter('DSI', { dryRun: true });
   Logger.log('--- testerDryRunDSI : voir le lien [envoi] dry-run ci-dessus ---');
+}
+
+/**
+ * Test OFFLINE de la construction des lignes _logs/_historique (par en-tête),
+ * du calcul de coût et du sujet. (Sans réseau ni Sheet.)
+ * @return {void}
+ */
+function testerLogsOffline() {
+  var echecs = 0;
+  function check(cond, libelle) {
+    if (!cond) { echecs++; Logger.log('FAIL: %s', libelle); }
+  }
+
+  // Construction de ligne par en-tête : place chaque valeur sous sa colonne.
+  var entetes = ['url_hash', 'sent_at', 'newsletter', 'url', 'title'];
+  var ligne = _construireLigneParEntetes_(entetes,
+    { url_hash: 'h1', newsletter: 'DSI', url: 'https://x', title: 'T', colonne_inconnue: 'ignorée' });
+  check(ligne.length === 5, 'ligne longueur = 5');
+  check(ligne[0] === 'h1', 'url_hash en colonne 0');
+  check(ligne[2] === 'DSI', 'newsletter en colonne 2');
+  check(ligne[4] === 'T', 'title en colonne 4');
+  check(ligne[1] === '', 'sent_at non fourni → vide');
+
+  // Calcul de coût : prix 1/5 USD/M, remise batch 0.5.
+  var cfg = { global: { prixInputParMillion: 1, prixOutputParMillion: 5 } };
+  var cout = _calculerCout_({ inputTokens: 1000000, outputTokens: 1000000 }, cfg);
+  // (1*1 + 1*5) * 0.5 = 3
+  check(Math.abs(cout - 3) < 1e-9, 'coût = 3 (got ' + cout + ')');
+  var somme = _additionnerUsage_({ inputTokens: 5, outputTokens: 2 }, { inputTokens: 10, outputTokens: 3 });
+  check(somme.inputTokens === 15 && somme.outputTokens === 5, 'usage additionné 15/5');
+
+  // Sujet : « {nom} — {date} ».
+  var sujet = _genererSujet_({ nom: 'DSI — Cyber et IA' });
+  check(sujet.indexOf('DSI — Cyber et IA — ') === 0, 'sujet préfixé par le nom (got ' + sujet + ')');
+
+  // Destinataires actifs : filtre active + email non vide.
+  var actifs = _destinatairesActifs_({ destinataires: [
+    { active: true, email: 'a@x.com' }, { active: false, email: 'b@x.com' }, { active: true, email: '' }
+  ] });
+  check(actifs.length === 1 && actifs[0].email === 'a@x.com', 'destinataires actifs filtrés');
+
+  Logger.log('--- testerLogsOffline : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
+}
+
+/**
+ * Test RÉEL de l'envoi Gmail bout-en-bout sur DSI (réseau + clé API + Drive +
+ * Gmail requis). ⚠️ ENVOIE DE VRAIS EMAILS aux destinataires actifs de DSI.
+ * Pré-requis : 1 destinataire de test `active=TRUE`, ANTHROPIC_API_KEY posée.
+ * Vérifier ensuite les onglets `_historique` (1 ligne/item) et `_logs` (1 ligne).
+ * @return {void}
+ */
+function testerEnvoiReelDSI() {
+  executerNewsletter('DSI', { dryRun: false });
+  Logger.log('--- testerEnvoiReelDSI : vérifier la boîte de test + onglets _historique et _logs ---');
+}
+
+/**
+ * Test RÉEL du rapport hebdo (S4) : envoie le récap 7 jours à admin_email.
+ * @return {void}
+ */
+function testerRapportHebdo() {
+  envoyerRapportHebdo();
+  Logger.log('--- testerRapportHebdo : vérifier la boîte admin ---');
 }
