@@ -326,3 +326,55 @@ prévisible plutôt que silencieux.
 sources actives partout + destinataires partiellement remplis, et asserte que la
 **dernière source** ressort `active: true` (échouait avant le fix). Test symétrique
 sur les Destinataires + `testerLocaliserTableauAmbiguite` pour le garde-fou.
+
+---
+
+## Décisions implicites de l'incrément 4 (rendu HTML + dry-run)
+
+### Rendu HTML (M5/M7)
+- `genererHTML(config, items)` est **pur** (string → string, testable offline). Email-safe :
+  tables + CSS inline ; conteneur interne **max-width 600px centré** + **media query**
+  `@media only screen and (max-width:600px)` pour empiler les méta (source/date) en mobile.
+- **Pied** : version du prompt (`config.promptVersion`, M7) + mention désinscription
+  (v1 : « répondre à ce mail »).
+- **Lien** : toujours `item.url` (source originale).
+- **Ordre des rubriques** = ordre de **première apparition** dans la colonne Rubrique du
+  tableau Sources (`config.sources`). Une rubrique qui réapparaît plus bas garde sa
+  position d'origine ; une rubrique d'item absente des sources est ajoutée en fin.
+  (Documenté dans `_grouperParRubrique_`.)
+
+### Échappement HTML — nature
+- Tout contenu de flux (titre, résumé, source) est **échappé** (`& < > " '`). L'échappement
+  est une **transformation technique** (encodage des caractères), **pas une reformulation** :
+  compatible avec la règle métier « titre verbatim » (la sémantique reste identique, seuls
+  les caractères techniques sont encodés).
+
+### Mode dry-run (S1)
+- `executerNewsletter(idNewsletter, options)` : le paramètre `options` est **réintroduit**
+  (il avait été retiré en incr. 1 ; désormais utilisé). `dryRun = options.dryRun || config.global.dryRunGlobal`.
+- Livraison via `livrerNewsletter` (`src_envoi.gs`, nouveau) : en dry-run, écrit un **fichier
+  HTML horodaté** (`dryrun-{id}-{aaaa-mm-jj_HH-MM}.html`) dans le dossier Drive `_drafts`.
+
+### 0 item sélectionné
+- Incr. 4 : on **logge et on s'arrête** (pas de rendu, pas de livraison).
+- **HOOK incr. 5** : ce cas devra déclencher un **mail admin** « newsletter X : 0 item cette
+  semaine — sources à investiguer ». À ne pas oublier à l'incrément 5.
+
+---
+
+## Écarts au PRD (incrément 4)
+
+1. **Dry-run en fichier HTML** (`.html` ouvrable au navigateur, rendu fidèle de l'email)
+   au lieu d'un « Doc Google » — déviation du texte PRD §6.3 (« Doc Google `dryrun-{date}` »),
+   **à corriger en v0.3 du PRD**. Raison : un Doc afficherait le *source* HTML, pas le rendu.
+
+---
+
+## Limitations connues (incrément 4)
+
+- **Compat email non vérifiable en sandbox** : le rendu sur Outlook desktop/web + Gmail
+  (critère M5) reste à valider manuellement sur 3 clients au pilote.
+- **`<style>` / media query** : supportés par la plupart des clients (Gmail moderne), mais
+  certains clients legacy ignorent `<style>` — les styles inline assurent le rendu desktop
+  de repli.
+- **Sujet de l'email** : non généré en incr. 4 (différé à l'incr. 5, M6).

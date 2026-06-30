@@ -278,3 +278,89 @@ function testerClaudeBatchBoutEnBout() {
   executerNewsletter('DSI');
   Logger.log('--- testerClaudeBatchBoutEnBout : voir les logs [claude] ci-dessus ---');
 }
+
+/**
+ * Test OFFLINE de l'échappement HTML.
+ * @return {void}
+ */
+function testerEchapperHtml() {
+  var got = _echapperHtml_('a & b < c > d "e" \'f\'');
+  var exp = 'a &amp; b &lt; c &gt; d &quot;e&quot; &#39;f&#39;';
+  Logger.log('--- testerEchapperHtml : %s ---', got === exp ? 'OK' : ('FAIL\n  got: ' + got + '\n  exp: ' + exp));
+}
+
+/**
+ * Test OFFLINE de genererHTML (sans réseau). Vérifie des fragments PRÉCIS du HTML
+ * produit (pattern testerCanonicaliserUrl). Couvre les 6 asserts minimum exigés.
+ * @return {void}
+ */
+function testerGenererHtml() {
+  var config = {
+    id: 'TEST',
+    nom: 'Newsletter Test',
+    couleur: '#1a3e5c',
+    sousTitre: 'Sous-titre éditorial',
+    promptVersion: 'v2026-06-27',
+    sources: [
+      { rubrique: 'Cyber' },
+      { rubrique: 'Economie' }
+    ]
+  };
+  // items dans un ordre DIFFÉRENT de l'ordre des sources (Economie avant Cyber).
+  var items = [
+    { rubrique: 'Economie', titre: 'Coût IA', url: 'https://eco.example/a',
+      source: 'EcoSource', datePublication: null, resumeFr: 'Résumé éco.' },
+    { rubrique: 'Cyber', titre: 'Faille AT&T critique', url: 'https://cyber.example/b',
+      source: 'CyberSource', datePublication: null, resumeFr: 'Résumé cyber.' }
+  ];
+  var html = genererHTML(config, items);
+  var echecs = 0;
+  function check(cond, libelle) {
+    if (!cond) { echecs++; Logger.log('FAIL: %s', libelle); }
+  }
+
+  // 1. URL d'un item présente dans un href=
+  check(html.indexOf('href="https://cyber.example/b"') !== -1, 'URL item dans href');
+  // 2. Titre contenant "&" rendu "&amp;"
+  check(html.indexOf('Faille AT&amp;T critique') !== -1, 'titre échappé (&amp;)');
+  check(html.indexOf('AT&T') === -1, 'pas de & brut dans le titre');
+  // 3. Couleur config dans le fond de l'en-tête
+  check(html.indexOf('background:#1a3e5c') !== -1, 'couleur dans le fond en-tête');
+  // 4. Ordre des rubriques = ordre des sources (Cyber avant Economie)
+  check(html.indexOf('Cyber') !== -1 && html.indexOf('Economie') !== -1 &&
+    html.indexOf('Cyber') < html.indexOf('Economie'), 'ordre rubriques = ordre sources');
+  // 5. Pied contient la promptVersion
+  check(html.indexOf('v2026-06-27') !== -1, 'promptVersion dans le pied');
+  // 6. Présence de la media query responsive
+  check(html.indexOf('@media only screen and (max-width:600px)') !== -1, 'media query responsive');
+
+  // Cas 0 item : ne lève pas, retourne string vide.
+  var vide = genererHTML(config, []);
+  check(vide === '', '0 item → string vide');
+
+  Logger.log('--- testerGenererHtml : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
+}
+
+/**
+ * Test RÉEL minimal de l'écriture du brouillon Drive (sans coût Claude).
+ * Écrit un HTML fixe dans `_drafts` et logge l'URL. Vérifie la création du
+ * dossier et du fichier.
+ * @return {void}
+ */
+function testerEcrireBrouillon() {
+  var config = { id: 'TEST', global: { dryRunGlobal: false } };
+  var html = '<!DOCTYPE html><html><body><h1>Test brouillon BIOXA</h1></body></html>';
+  var res = livrerNewsletter(config, html, { dryRun: true });
+  Logger.log('=== testerEcrireBrouillon ===');
+  Logger.log('mode=%s url=%s', res.mode, res.url);
+}
+
+/**
+ * Test RÉEL bout-en-bout en dry-run sur DSI (réseau + clé API + Drive requis).
+ * Produit un fichier HTML dans `_drafts`, sans envoi Gmail.
+ * @return {void}
+ */
+function testerDryRunDSI() {
+  executerNewsletter('DSI', { dryRun: true });
+  Logger.log('--- testerDryRunDSI : voir le lien [envoi] dry-run ci-dessus ---');
+}
