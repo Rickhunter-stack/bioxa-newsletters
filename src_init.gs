@@ -106,7 +106,7 @@ function _initOngletHistorique_(classeur) {
 function _initOngletLogs_(classeur) {
   _ecrireSheet_(classeur, ONGLETS_TECHNIQUES.logs, 'A1',
     [['timestamp', 'newsletter', 'nb_collectes', 'nb_pre_filtres', 'nb_scores',
-      'nb_envoyes', 'duree_sec', 'statut', 'message']]);
+      'nb_envoyes', 'duree_sec', 'statut', 'message', 'cout_estime']]);
 }
 
 /**

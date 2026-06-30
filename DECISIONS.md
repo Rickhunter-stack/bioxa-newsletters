@@ -378,3 +378,63 @@ sur les Destinataires + `testerLocaliserTableauAmbiguite` pour le garde-fou.
   certains clients legacy ignorent `<style>` — les styles inline assurent le rendu desktop
   de repli.
 - **Sujet de l'email** : non généré en incr. 4 (différé à l'incr. 5, M6).
+
+---
+
+## Décisions implicites de l'incrément 5 (envoi réel + historique + logs + admin)
+
+### Envoi Gmail (M6)
+- **1 envoi par destinataire actif** (pas de BCC, pour journaliser par destinataire),
+  **try/catch par destinataire** (un échec n'arrête pas les autres).
+- **Sujet** : généré en code = `{nom} — {jj/mm/aaaa}` (non paramétrable en Sheet v1).
+- **Expéditeur** : compte propriétaire du script (HYP4 : `selasbioxa@gmail.com`), pas
+  d'override `from` ; nom d'affichage `BIOXA Veille` (`NOM_EXPEDITEUR`).
+- **Quota** : arrêt si `min(GmailApp.getRemainingDailyQuota(), config.gmail_quota_jour)`
+  est atteint en cours d'envoi → incident loggé + mail admin ; les déjà-envoyés restent partis.
+- Corps texte de repli + `htmlBody` (rendu HTML).
+
+### Historique (P4) / Logs (P5)
+- **`_historique`** écrit **si ≥ 1 destinataire servi** (items réellement délivrés) —
+  1 ligne/item (`url_hash, sent_at, newsletter, url, title`). Jamais en dry-run.
+- **`_logs`** : **toujours** 1 ligne/run (bloc `finally`), même sur abort/0 item.
+  Statuts : `OK` / `PARTIEL` / `VIDE` / `DRY-RUN` / `ERREUR`.
+- Écritures **par en-tête** (`_ajouterLignesParEntetes_`) : robustes au décalage de
+  colonnes, alignées sur la ligne 1 (cohérent avec `_lireColonneOnglet_`).
+
+### Mail admin (P6)
+Déclencheurs en incr. 5 : (a) **échec Claude/run annulé**, (b) **quota Gmail atteint**,
+(c) **0 item sélectionné** (avec compte de sources HS). `admin_email` vide → warning, pas d'envoi.
+
+### Rapport hebdo (S4)
+- `envoyerRapportHebdo()` lit `_logs` sur **7 jours** → nb runs, **envois totaux**,
+  **coût Claude total**, ventilation par newsletter ; envoyé à `admin_email`.
+- Le **trigger « dimanche soir » est câblé à l'incrément 6** ; ici fonction lançable
+  manuellement (`testerRapportHebdo`).
+
+### Coût Claude persisté
+- `prefilterTitres`/`scorerEtResumer` renvoient désormais **`{ items, usage }`** (refactor)
+  pour remonter le `usage` tokens ; `executerNewsletter` somme et calcule le coût
+  (`_calculerCout_`, remise Batch −50 %) écrit en colonne `cout_estime` de `_logs`.
+
+---
+
+## Écarts au PRD (incrément 5)
+
+1. **S4 (rapport hebdo) anticipé en incr. 5** (le PRD §6.5 le plaçait en incr. 8). Validé.
+2. **Colonne `cout_estime` ajoutée à `_logs`** — au-delà du schéma `_logs` du PRD §11
+   annexe A (9 colonnes). Nécessaire au coût du rapport S4. **À acter en PRD v0.3.**
+3. **S4 « sources jamais retenues sur 4 semaines » REPORTÉ** — nécessite une attribution
+   par source dans `_historique` (colonne `source` absente v1). S4 livre nb envois + coût ;
+   l'analyse des sources non retenues viendra quand on ajoutera `source` à `_historique`.
+
+---
+
+## Limitations connues (incrément 5)
+
+- **`cout_estime` sur un `_logs` préexistant** : les onglets `_logs` créés avant l'incr. 5
+  (9 colonnes) n'ont pas la colonne `cout_estime` → la valeur est ignorée + warning (pas
+  de crash). Recréer l'onglet `_logs` (ou ajouter l'en-tête `cout_estime`) pour l'activer.
+- **Quota Gmail compte gratuit** : 100 envois/jour, tous newsletters confondues
+  (`getRemainingDailyQuota` est global au compte) — étaler les jours d'envoi (PRD §7.4).
+- **Envoi réel non testable en sandbox** : `testerEnvoiReelDSI` envoie de vrais emails —
+  à lancer manuellement vers une boîte de test.

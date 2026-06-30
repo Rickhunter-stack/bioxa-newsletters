@@ -24,7 +24,8 @@ Le pipeline (collecte → pré-filtre → scoring → rendu → envoi) arrive au
 | `src_dedup.gs` | `dedoublonner(items, idNewsletter)` — dédup par hash d'URL vs `_historique` (PRD M2) |
 | `src_claude.gs` | `prefilterTitres` + `scorerEtResumer` via `appelerClaudeBatch` — Claude Batch (PRD M3/M4) |
 | `src_render.gs` | `genererHTML(config, items)` — rendu HTML email responsive (PRD M5/M7), pur/offline |
-| `src_envoi.gs` | `livrerNewsletter(config, html, options)` — dry-run Drive (S1) ; envoi Gmail = incr. 5 |
+| `src_envoi.gs` | `livrerNewsletter` / `envoyerGmail` — dry-run Drive (S1) + envoi Gmail réel (M6) |
+| `src_logs.gs` | `ecrireHistorique` (P4) / `logRun` (P5) / `envoyerMailAdmin` (P6) / `envoyerRapportHebdo` (S4) |
 | `src_test.gs` | Tests manuels (init, lireConfig, canonicalisation, collecte, dédup, parse Claude, rendu HTML offline, dry-run) |
 | `appsscript.json` | Manifest (timezone Europe/Paris, runtime V8) |
 | `DECISIONS.md` | Décisions implicites (clés exactes, tokens, formats) + exemples de remplissage DSI |
@@ -53,7 +54,7 @@ En-têtes ligne 1 : `Clé | Valeur`. Une ligne par paramètre.
 En-têtes ligne 1 : `url_hash` · `sent_at` · `newsletter` · `url` · `title`.
 
 ### Onglet `_logs` (1 ligne par run)
-En-têtes ligne 1 : `timestamp` · `newsletter` · `nb_collectes` · `nb_pre_filtres` · `nb_scores` · `nb_envoyes` · `duree_sec` · `statut` · `message`.
+En-têtes ligne 1 : `timestamp` · `newsletter` · `nb_collectes` · `nb_pre_filtres` · `nb_scores` · `nb_envoyes` · `duree_sec` · `statut` · `message` · `cout_estime`.
 
 ### Onglet `DSI` (template neutre, identique pour `Qualite`, `RH`, …)
 Quatre blocs dans le **même onglet**. `lireConfig` localise les tableaux par leurs
@@ -131,6 +132,11 @@ sauf si la Sheet ou l'onglet de la newsletter est totalement introuvable.
 12. **`testerEcrireBrouillon`** (HTML fixe → Drive `_drafts`, sans coût Claude) et
     **`testerDryRunDSI`** (`executerNewsletter('DSI', {dryRun:true})`, bout-en-bout) :
     produisent un fichier HTML horodaté dans le dossier Drive `_drafts`.
+13. **`testerLogsOffline`** : test **offline** de la construction des lignes
+    `_logs`/`_historique` (par en-tête), du calcul de coût, du sujet, des destinataires actifs.
+14. **`testerEnvoiReelDSI`** (`executerNewsletter('DSI')`) — ⚠️ **envoie de vrais emails**
+    aux destinataires actifs + écrit `_historique`/`_logs` — et **`testerRapportHebdo`**
+    (envoie le récap hebdo S4 à `admin_email`). Réseau + `ANTHROPIC_API_KEY` requis.
 
 ## Secrets
 
