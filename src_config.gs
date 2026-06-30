@@ -301,7 +301,7 @@ function _extraireVersionPrompt_(prompt) {
  * @private
  */
 function _lireSources_(valeurs, idNewsletter) {
-  var tab = _localiserTableau_(valeurs, ['rubrique', 'url rss']);
+  var tab = _localiserTableau_(valeurs, ['rubrique', 'url rss'], idNewsletter);
   if (!tab.trouve) {
     Logger.log('[lireConfig][WARN] %s : tableau Sources introuvable — en-tête(s) manquant(s) : %s.',
       idNewsletter, tab.manquants.join(', '));
@@ -336,7 +336,7 @@ function _lireSources_(valeurs, idNewsletter) {
  * @private
  */
 function _lireDestinataires_(valeurs, idNewsletter) {
-  var tab = _localiserTableau_(valeurs, ['email', 'nom']);
+  var tab = _localiserTableau_(valeurs, ['email', 'nom'], idNewsletter);
   if (!tab.trouve) {
     Logger.log('[lireConfig][WARN] %s : tableau Destinataires introuvable — en-tête(s) manquant(s) : %s.',
       idNewsletter, tab.manquants.join(', '));
@@ -360,40 +360,97 @@ function _lireDestinataires_(valeurs, idNewsletter) {
 }
 
 /**
- * Localise un tableau par sa ligne d'en-tête : trouve la première ligne
- * contenant TOUS les libellés requis (insensible à la casse). Si aucune ligne
- * ne matche complètement, renvoie `trouve:false` + la liste des en-têtes
- * manquants de la meilleure ligne candidate (pour un warning explicite, #6).
+ * Localise un tableau par sa ligne d'en-tête, en SCOPANT les colonnes au SEGMENT
+ * CONTIGU de cellules non vides qui contient la signature.
+ *
+ * Pourquoi : Sources (A-E) et Destinataires (G-I) partagent la même ligne
+ * d'en-tête, et le libellé « Active » y figure deux fois. Mapper toute la ligne
+ * (dernier-écrit-gagne) faisait pointer `active` sur la colonne du MAUVAIS tableau
+ * → bug « dernière source toujours inactive ». On découpe donc la ligne en
+ * segments contigus (séparés par ≥ 1 colonne vide) et on ne mappe que le segment
+ * qui porte la signature, avec premier-écrit-gagne à l'intérieur du segment.
+ *
+ * Garde-fou : si PLUSIEURS segments portent la signature (template cassé, 3e
+ * tableau parasite), on logge un warning d'ambiguïté et on retient le PREMIER
+ * (comportement déterministe).
+ *
  * @param {Array.<Array>} valeurs
  * @param {Array.<string>} enTetesRequis En minuscules.
+ * @param {string} [contexte] Identifiant (idNewsletter) pour les logs.
  * @return {{trouve: boolean, ligneEnTete: number,
  *           colonnes: !Object.<string, number>, manquants: Array.<string>}}
  * @private
  */
-function _localiserTableau_(valeurs, enTetesRequis) {
+function _localiserTableau_(valeurs, enTetesRequis, contexte) {
   var meilleursManquants = enTetesRequis.slice();
   for (var r = 0; r < valeurs.length; r++) {
-    var cols = {};
-    for (var c = 0; c < valeurs[r].length; c++) {
-      var libelle = _texte_(valeurs[r][c]).toLowerCase();
-      if (libelle) {
-        cols[libelle] = c;
+    var segments = _segmentsContigus_(valeurs[r]);
+    var candidats = [];
+    for (var s = 0; s < segments.length; s++) {
+      var manquants = enTetesRequis.filter(function(h) {
+        return !Object.prototype.hasOwnProperty.call(segments[s].colonnes, h);
+      });
+      if (manquants.length === 0) {
+        candidats.push(segments[s]);
+      } else if (manquants.length < meilleursManquants.length) {
+        meilleursManquants = manquants;
       }
     }
-    var manquants = [];
-    for (var i = 0; i < enTetesRequis.length; i++) {
-      if (!Object.prototype.hasOwnProperty.call(cols, enTetesRequis[i])) {
-        manquants.push(enTetesRequis[i]);
+    if (candidats.length >= 1) {
+      if (candidats.length > 1) {
+        Logger.log('[lireConfig][WARN] %s : ambiguïté détectée pour la signature [%s] — ' +
+          '%s segments candidats (colonnes de début : %s). Premier retenu.',
+          contexte, enTetesRequis.join(', '), candidats.length,
+          candidats.map(function(c) { return _lettreColonne_(c.debut); }).join(', '));
       }
-    }
-    if (manquants.length === 0) {
-      return { trouve: true, ligneEnTete: r, colonnes: cols, manquants: [] };
-    }
-    if (manquants.length < meilleursManquants.length) {
-      meilleursManquants = manquants;
+      return { trouve: true, ligneEnTete: r, colonnes: candidats[0].colonnes, manquants: [] };
     }
   }
   return { trouve: false, ligneEnTete: -1, colonnes: {}, manquants: meilleursManquants };
+}
+
+/**
+ * Découpe une ligne en segments contigus de cellules non vides (séparés par ≥ 1
+ * cellule vide). Chaque segment mappe libellé (minuscule) → index de colonne, en
+ * PREMIER-écrit-gagne si un libellé se répète dans le même segment.
+ * @param {Array} ligne
+ * @return {Array.<{debut: number, colonnes: !Object.<string, number>}>}
+ * @private
+ */
+function _segmentsContigus_(ligne) {
+  var segments = [];
+  var courant = null;
+  for (var c = 0; c < ligne.length; c++) {
+    var libelle = _texte_(ligne[c]).toLowerCase();
+    if (libelle === '') {
+      courant = null;
+      continue;
+    }
+    if (!courant) {
+      courant = { debut: c, colonnes: {} };
+      segments.push(courant);
+    }
+    if (!Object.prototype.hasOwnProperty.call(courant.colonnes, libelle)) {
+      courant.colonnes[libelle] = c; // premier-écrit-gagne dans le segment
+    }
+  }
+  return segments;
+}
+
+/**
+ * Convertit un index de colonne 0-based en lettre de colonne A1 (0→A, 6→G, 26→AA).
+ * @param {number} idx
+ * @return {string}
+ * @private
+ */
+function _lettreColonne_(idx) {
+  var n = idx;
+  var s = '';
+  do {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return s;
 }
 
 /* ── Conversions / typage défensif ──────────────────────────────────────── */

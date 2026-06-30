@@ -120,6 +120,9 @@ sauf si la Sheet ou l'onglet de la newsletter est totalement introuvable.
 9. **`testerPrefilter`** / **`testerScoring`** / **`testerClaudeBatchBoutEnBout`** :
    appels **réels** à Claude Batch (réseau + `ANTHROPIC_API_KEY` requis, consomment
    des tokens). Poser d'abord la Script Property `ANTHROPIC_API_KEY`.
+10. **`testerLireTableauxColonnes`** / **`testerLocaliserTableauAmbiguite`** : tests
+    **offline** de la lecture des tableaux Sources/Destinataires (non-régression du bug
+    « dernière source toujours inactive » + garde-fou d'ambiguïté).
 
 ## Secrets
 
