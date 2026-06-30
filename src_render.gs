@@ -101,9 +101,20 @@ function _rendreItem_(item, couleur) {
   var date = item.datePublication ? _formaterDateFr_(item.datePublication) : '';
   var resume = _echapperHtml_(_texte_(item.resumeFr));
 
+  // Traduction FR additionnelle : affichée en sous-titre gris SOUS le titre, et
+  // SEULEMENT si une traduction existe ET que le titre original n'est pas déjà FR
+  // (double garde : null côté Claude + heuristique côté code). Titre original
+  // toujours conservé verbatim.
+  var traduction = '';
+  if (_texte_(item.titreTraduction) !== '' && !_estFrancais_(item.titre)) {
+    traduction = '<div style="font-size:13px;color:#888888;font-style:italic;margin-top:2px;">' +
+      _echapperHtml_(_texte_(item.titreTraduction)) + '</div>\n';
+  }
+
   return '<tr><td style="padding:14px 20px;border-bottom:1px solid #eeeeee;">\n' +
     '<a href="' + url + '" style="font-size:16px;font-weight:bold;color:' + couleur +
     ';text-decoration:none;">' + titre + '</a>\n' +
+    traduction +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:6px 0;">\n' +
     '<tr>\n' +
     '<td class="bx-col" align="left" style="font-size:12px;color:#888888;">' + source + '</td>\n' +
@@ -191,3 +202,36 @@ function _echapperHtml_(s) {
 function _formaterDateFr_(date) {
   return Utilities.formatDate(date, 'Europe/Paris', 'dd/MM/yyyy');
 }
+
+/**
+ * Détection langue RUDIMENTAIRE : un texte est considéré français s'il contient
+ * un accent français OU ≥ 2 mots français fréquents. Sert de garde pour ne pas
+ * afficher de traduction sur un titre déjà francophone.
+ * @param {string} texte
+ * @return {boolean}
+ * @private
+ */
+function _estFrancais_(texte) {
+  var t = _texte_(texte);
+  if (t === '') {
+    return false;
+  }
+  if (/[éèêëàâäçôöîïùûü]/i.test(t)) {
+    return true;
+  }
+  var mots = t.toLowerCase().split(/[^a-zàâäéèêëîïôöùûüç]+/);
+  var n = 0;
+  for (var i = 0; i < mots.length; i++) {
+    if (MOTS_FR_FREQUENTS[mots[i]]) {
+      n++;
+    }
+  }
+  return n >= 2;
+}
+
+/** Mots français fréquents (heuristique de détection de langue). @const */
+var MOTS_FR_FREQUENTS = {
+  le: 1, la: 1, les: 1, des: 1, du: 1, un: 1, une: 1, et: 1, pour: 1, avec: 1,
+  dans: 1, sur: 1, par: 1, que: 1, qui: 1, ne: 1, pas: 1, au: 1, aux: 1, ce: 1,
+  cette: 1, est: 1, sont: 1, plus: 1, son: 1, ses: 1, leur: 1
+};

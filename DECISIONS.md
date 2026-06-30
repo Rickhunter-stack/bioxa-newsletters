@@ -100,11 +100,16 @@ Critères de pertinence par ordre décroissant :
 4. Qualité de la source
 
 Renvoie strictement un JSON par item :
-[{"url": "...", "score": 0-10, "resume_fr": "...", "raison": "..."}]
+[{"url": "...", "score": 0-10, "resume_fr": "...", "titre_traduction": "..."|null, "raison": "..."}]
 
 Le résumé fait ≤ 200 caractères, factuel, sans donnée chiffrée inventée.
-Le titre n'est PAS à reformuler.
+Le titre original n'est PAS à reformuler ni remplacer.
+"titre_traduction" = traduction FR fidèle du titre (null si déjà en français).
 ```
+
+> NB : l'instruction `titre_traduction` est aussi **ajoutée automatiquement en code**
+> (`SUFFIXE_PROMPT_TRADUCTION`) au prompt de scoring — la fonctionnalité marche même
+> si l'admin ne l'inscrit pas dans le prompt Sheet.
 
 > Mettre à jour le label `# v{date}` à chaque modification du prompt.
 
@@ -438,3 +443,41 @@ Déclencheurs en incr. 5 : (a) **échec Claude/run annulé**, (b) **quota Gmail 
   (`getRemainingDailyQuota` est global au compte) — étaler les jours d'envoi (PRD §7.4).
 - **Envoi réel non testable en sandbox** : `testerEnvoiReelDSI` envoie de vrais emails —
   à lancer manuellement vers une boîte de test.
+
+---
+
+## Traduction FR additive des titres (feat, post-incr. 5)
+
+### Règle métier (modifiée — actée dans CLAUDE.md + PRD v0.3)
+Le **titre original reste conservé VERBATIM** depuis le flux RSS (jamais reformulé ni
+remplacé). Une **traduction française additionnelle** (`titreTraduction`) est générée
+par Claude au scoring et affichée **en complément**, jamais à la place du titre original.
+
+### Sortie du scoring (M4)
+`{ score, resume_fr, titre_traduction (string|null), raison }`. Schéma structured
+outputs : `titre_traduction` est **`required` mais nullable** (`type: ["string","null"]`)
+→ Claude doit émettre le champ (`null` si le titre est déjà français). Mappé sur
+`item.titreTraduction` (`''` si null/absent — fallback défensif).
+
+### Instruction
+Ajoutée **en code** au prompt système de scoring (`SUFFIXE_PROMPT_TRADUCTION`) → feature
+auto-contenue, indépendante du prompt Sheet.
+
+### Détection de langue (double garde)
+1. **Claude** : renvoie `null` si le titre est déjà en français (jugement primaire).
+2. **Code** (`_estFrancais_`, rudimentaire) : `true` si accent FR (`é è ê ë à â ä ç ô ö î ï ù û ü`)
+   OU ≥ 2 mots FR fréquents (`le la les des du un une et pour avec dans sur…`).
+La traduction n'est **affichée que si** `titreTraduction` non vide **ET** `_estFrancais_(titre)`
+est `false` — garde contre une traduction parasite sur un titre déjà FR.
+
+### Rendu
+Titre original = lien titre (verbatim, échappé) ; **traduction FR en sous-titre gris
+italique, juste sous le titre**, avant la méta source · date.
+
+### Comportement si `titre_traduction` absent/illisible
+Traité comme `null` → **aucune traduction affichée**, item rendu normalement (pas de crash).
+
+### Limitation
+Détection de langue **rudimentaire** (accents + mots fréquents) : un titre anglais sans
+accent contenant par coïncidence ≥ 2 tokens ressemblant à des mots FR pourrait être
+classé FR à tort (rare). Suffisant pour la v1.

@@ -137,6 +137,8 @@ sauf si la Sheet ou l'onglet de la newsletter est totalement introuvable.
 14. **`testerEnvoiReelDSI`** (`executerNewsletter('DSI')`) — ⚠️ **envoie de vrais emails**
     aux destinataires actifs + écrit `_historique`/`_logs` — et **`testerRapportHebdo`**
     (envoie le récap hebdo S4 à `admin_email`). Réseau + `ANTHROPIC_API_KEY` requis.
+15. **`testerEstFrancais`** / **`testerTraductionTitre`** : tests **offline** de la traduction
+    FR additive des titres (détection de langue + affichage conditionnel ; titre original verbatim).
 
 ## Secrets
 

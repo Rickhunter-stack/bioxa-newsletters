@@ -66,12 +66,23 @@ var FORMAT_SCORING = {
     properties: {
       score: { type: 'integer' },
       resume_fr: { type: 'string' },
+      titre_traduction: { type: ['string', 'null'] },
       raison: { type: 'string' }
     },
-    required: ['score', 'resume_fr', 'raison'],
+    required: ['score', 'resume_fr', 'titre_traduction', 'raison'],
     additionalProperties: false
   }
 };
+
+/**
+ * Instruction de traduction ajoutée au prompt système de scoring (auto-contenu,
+ * indépendant du prompt Sheet). Le titre original reste verbatim ; la traduction
+ * est un champ ADDITIONNEL distinct.
+ */
+var SUFFIXE_PROMPT_TRADUCTION =
+  '\n\nEn plus du score, du résumé et de la raison, renseigne "titre_traduction" : ' +
+  'la traduction française fidèle du titre de l\'article. Si le titre est DÉJÀ en ' +
+  'français, mets "titre_traduction" à null. Ne modifie jamais le titre original.';
 
 /* ──────────────────────────────────────────────────────────────────────────
  * M3 — Pré-filtre IA sur titre seul.
@@ -172,7 +183,7 @@ function scorerEtResumer(items, config) {
       custom_id: item.urlHash,
       params: {
         max_tokens: 400,
-        system: config.promptSysteme,
+        system: config.promptSysteme + SUFFIXE_PROMPT_TRADUCTION,
         messages: [{ role: 'user', content: contenu }],
         output_config: { format: FORMAT_SCORING }
       }
@@ -196,6 +207,8 @@ function scorerEtResumer(items, config) {
     }
     item.score = _bornerScore_(parsed.score);
     item.resumeFr = _tronquerResume_(_texte_(parsed.resume_fr), item.titre);
+    // Traduction FR additionnelle (null/absente → '' ; jamais le titre original).
+    item.titreTraduction = _texte_(parsed.titre_traduction);
     item.raison = _texte_(parsed.raison);
     scores.push(item);
   });

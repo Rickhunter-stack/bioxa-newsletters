@@ -1,6 +1,6 @@
 # PRD — Plateforme Newsletters BIOXA (v1 : newsletter DSI Cyber+IA)
 
-**Version** : 0.2 (draft) — révision majeure : architecture Apps Script + pattern multi-newsletter
+**Version** : 0.3 (draft) — v0.2 : architecture Apps Script + pattern multi-newsletter ; **v0.3 : titre conservé verbatim + traduction FR additive (champ `titreTraduction`), cf. M4 et §6.2**
 **Auteur** : {à compléter}
 **Date** : 2026-06-25
 **Statut** : Brouillon — à valider
@@ -124,7 +124,7 @@ Volumétrie cible à plein régime (6 newsletters) : ~5 envois hebdomadaires + 1
 | M1 | Collecte parallèle RSS | `UrlFetchApp.fetchAll()` sur les sources actives de la newsletter, fenêtre 7 j (ou 30 j pour cadence mensuelle), parsing XML via `XmlService` | Quand la collecte est lancée pour la newsletter DSI, ≥ 10 items bruts par rubrique active sont retournés si les sources sont en ligne ; les sources HS sont loggées et ignorées |
 | M2 | Déduplication par url_hash | SHA-256 de l'URL canonicalisée (lowercase, sans utm_*, sans trailing slash) ; rejet si présent dans `_historique` ou intra-run | Quand un même article apparaît dans 2 sources, il est conservé une seule fois ; re-exécuter 2 fois → 2e run ignore les items du 1er |
 | M3 | Pré-filtre IA sur titre seul | *Levier 01 de tes schémas*. Premier appel Claude Batch : « concerne {rubrique} ? oui/non » pour chaque titre. Les `non` sont rejetés avant scoring détaillé | Quand 100 items sont collectés, l'appel pré-filtre retourne une décision oui/non pour chaque, et seuls les `oui` passent à M4 — réduction observée des items à scorer ≥ 40 % |
-| M4 | Scoring + résumé par Claude API Batch | Pour chaque item passant le pré-filtre : appel Batch unique retournant `{score: 0-10, resume_fr: string ≤ 200 char, raison: string}`. Prompt système versionné, stocké dans l'onglet de la newsletter (colonne `Prompt système`). Modèle utilisé : `claude-haiku-4-5-20251001` (configurable dans `_config`) | Quand 50 items passent au scoring, la réponse Batch contient 50 enregistrements valides, le top N est sélectionné (N=5 par défaut configurable), et chaque résumé fait ≤ 200 caractères en français |
+| M4 | Scoring + résumé par Claude API Batch | Pour chaque item passant le pré-filtre : appel Batch unique retournant `{score: 0-10, resume_fr: string ≤ 200 char, titre_traduction: string|null, raison: string}` (v0.3 : `titre_traduction` = traduction FR additive du titre, `null` si déjà FR ; le titre original reste verbatim). Prompt système versionné, stocké dans l'onglet de la newsletter (colonne `Prompt système`). Modèle utilisé : `claude-haiku-4-5-20251001` (configurable dans `_config`) | Quand 50 items passent au scoring, la réponse Batch contient 50 enregistrements valides, le top N est sélectionné (N=5 par défaut configurable), et chaque résumé fait ≤ 200 caractères en français |
 | M5 | Rendu HTML email responsive | Template HTML mutualisé (Jinja-like via `Utilities.formatString` ou littéraux template) avec en-tête configurable par newsletter (nom, couleur, sous-titre éditorial), 1 section par rubrique, lien source par item, pied de page avec version du prompt + lien désinscription manuel | Quand le HTML est généré, il s'affiche correctement sur Outlook desktop, Outlook web et Gmail (test manuel sur 3 clients) |
 | M6 | Envoi via GmailApp | `GmailApp.sendEmail()` depuis `selasbioxa@gmail.com`, 1 envoi par destinataire (pas de BCC global pour permettre journalisation par destinataire), gestion des quotas Gmail (cf. §7.4) | Quand l'envoi est lancé pour 30 destinataires, chacun reçoit l'email en < 5 min ; si le quota Gmail journalier est atteint avant la fin, l'incident est loggé et un mail admin est envoyé |
 | M7 | Versioning du prompt dans la sortie | Le pied de chaque newsletter inscrit la version du prompt système utilisée (ex. hash court ou label `v2026-06-25`) | Quand la newsletter est reçue, son pied affiche le label de version du prompt, permettant de retracer un résumé en cas de question |
@@ -184,14 +184,14 @@ Pipeline d'une exécution `executerNewsletter(idNewsletter)` :
 2. **Collecte parallèle** : `UrlFetchApp.fetchAll()` sur toutes les sources actives (max 100 URLs en parallèle — limite Apps Script). Timeout : 30 s par requête. Parsing XML via `XmlService`. Fenêtre temporelle : derniers 7 j (hebdo) ou 30 j (mensuel).
 3. **Déduplication** : pour chaque item, calcul `url_hash` (SHA-256 URL canonicalisée). Filtrage contre `_historique` (lecture optimisée : 1 seul `getValues()` sur la colonne hash, mise en `Set` pour lookup O(1)).
 4. **Pré-filtre IA (M3, levier 01)** : un seul appel Claude Batch avec tous les titres restants, prompt « Pour chaque titre, retourne `{url, decision: "oui"|"non"}` — concerne-t-il la rubrique {rubrique} ? ». Sortie JSON strict. Items `non` rejetés.
-5. **Scoring + résumé (M4)** : un seul appel Claude Batch avec les items survivants, prompt système de l'onglet newsletter, sortie `[{url, score, resume_fr, raison}]`. Sélection top N par rubrique selon `_config!N_items_par_rubrique`.
+5. **Scoring + résumé (M4)** : un seul appel Claude Batch avec les items survivants, prompt système de l'onglet newsletter, sortie `[{url, score, resume_fr, titre_traduction, raison}]` (v0.3 : `titre_traduction` = traduction FR additive, `null` si déjà FR). Sélection top N par rubrique selon `_config!N_items_par_rubrique`.
 6. **Rendu HTML** : assemblage du template mutualisé hydraté (rubriques, items, en-tête newsletter, version prompt, pied de page).
 7. **Envoi Gmail** : boucle `GmailApp.sendEmail()` sur les destinataires actifs. Try/catch par destinataire. Comptage des envois pour respect du quota journalier (cf. §7.4).
 8. **Persistance historique** : `appendRow()` dans `_historique` pour chaque item envoyé (url_hash, sent_at, newsletter, url, title).
 9. **Log final** : `appendRow()` dans `_logs` avec compteurs et statut.
 
 **Règles métier critiques** :
-- Le titre est conservé verbatim depuis le flux RSS (pas de réécriture par Claude)
+- Le titre est conservé verbatim depuis le flux RSS (pas de réécriture ni remplacement par Claude). v0.3 : une **traduction FR additive** (`titre_traduction`) est autorisée en complément, affichée sous le titre original si l'article est non-francophone
 - Le lien dans l'email pointe TOUJOURS vers la source originale (pas vers un agrégateur, pas vers un proxy)
 - Si Claude renvoie un résumé > 200 caractères, troncature à 200 + `…` (et log warning)
 - Le prompt système est versionné par un commentaire `# v2026-MM-JJ` en première ligne ; ce label est repris dans le pied de la newsletter
@@ -397,10 +397,11 @@ Critères de pertinence par ordre décroissant :
 4. Qualité de la source
 
 Renvoie strictement un JSON par item :
-[{"url": "...", "score": 0-10, "resume_fr": "...", "raison": "..."}]
+[{"url": "...", "score": 0-10, "resume_fr": "...", "titre_traduction": "..."|null, "raison": "..."}]
 
 Le résumé fait ≤ 200 caractères, factuel, sans donnée chiffrée inventée.
-Le titre n'est PAS à reformuler.
+Le titre original n'est PAS à reformuler ni remplacer.
+"titre_traduction" = traduction FR fidèle du titre (null si le titre est déjà en français).
 
 
 ═══════════════════════════════════════════════════════════════

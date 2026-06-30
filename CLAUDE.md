@@ -36,7 +36,7 @@ Première instance livrée : newsletter DSI Cyber+IA. Cinq autres newsletters th
 - Gestion d'erreur : `try/catch` autour de chaque appel externe (UrlFetchApp, GmailApp.sendEmail), JAMAIS de `catch` muet
 
 ## Règles métier non négociables
-- Le titre d'un article est conservé VERBATIM depuis le flux RSS — jamais reformulé par Claude
+- Le titre d'un article est conservé VERBATIM depuis le flux RSS — jamais reformulé ni remplacé. Une **traduction française additionnelle** (champ séparé `titreTraduction`, généré par Claude au scoring) est autorisée : elle vient EN COMPLÉMENT, affichée sous le titre, et n'altère jamais le titre original
 - Le lien dans l'email pointe TOUJOURS vers la source originale, jamais vers un agrégateur ou un proxy
 - AUCUNE donnée patient, donnée RH nominative, ou donnée interne BIOXA confidentielle n'est envoyée à l'API Claude. Seuls : titres et résumés bruts d'articles publics
 - Le résumé fait ≤ 200 caractères. Si Claude dépasse, troncature à 200 + `…` et warning dans les logs
@@ -83,7 +83,7 @@ src_test.gs              // fonctions de test manuel
 - Mettre en dur une URL, un email, une clé API ou un identifiant dans le code — tout vient de la Sheet ou de `PropertiesService`
 - Modifier ce `CLAUDE.md` sans en faire la demande explicite
 - Modifier le PRD sans demande explicite (le PRD est figé par version, les écarts se notent en HYP dans une PR séparée)
-- Reformuler un titre d'article via le LLM
+- Reformuler ou **remplacer** le titre original d'un article via le LLM (le titre verbatim reste toujours affiché ; seule une **traduction FR additionnelle distincte** — champ `titreTraduction` — est permise)
 - Envoyer du contenu interne BIOXA à l'API Claude
 
 ## Recette d'un incrément avant merge

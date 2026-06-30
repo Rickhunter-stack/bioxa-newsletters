@@ -427,3 +427,52 @@ function testerRapportHebdo() {
   envoyerRapportHebdo();
   Logger.log('--- testerRapportHebdo : vérifier la boîte admin ---');
 }
+
+/**
+ * Test OFFLINE de la détection de langue rudimentaire (_estFrancais_).
+ * @return {void}
+ */
+function testerEstFrancais() {
+  var echecs = 0;
+  function check(cond, libelle) {
+    if (!cond) { echecs++; Logger.log('FAIL: %s', libelle); }
+  }
+  check(_estFrancais_('Faille critique détectée') === true, 'accent é → FR');
+  check(_estFrancais_('The Hacker News reports a breach') === false, 'EN sans accent ni mots FR → non FR');
+  check(_estFrancais_('Le rapport sur la sécurité') === true, 'accent + mots FR → FR');
+  check(_estFrancais_('Un nouveau modele pour les entreprises') === true, 'mots FR (un, pour, les) sans accent → FR');
+  check(_estFrancais_('') === false, 'vide → non FR');
+  Logger.log('--- testerEstFrancais : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
+}
+
+/**
+ * Test OFFLINE du rendu de la traduction FR additive : affichée pour un titre
+ * anglophone, MASQUÉE pour un titre déjà français, titre original toujours verbatim.
+ * @return {void}
+ */
+function testerTraductionTitre() {
+  var echecs = 0;
+  function check(cond, libelle) {
+    if (!cond) { echecs++; Logger.log('FAIL: %s', libelle); }
+  }
+  var config = {
+    id: 'TEST', nom: 'Test', couleur: '#1a3e5c', sousTitre: '', promptVersion: 'v1',
+    sources: [{ rubrique: 'Cyber' }]
+  };
+  var items = [
+    { rubrique: 'Cyber', titre: 'Critical AT&T breach', url: 'https://x/a', source: 'S',
+      datePublication: null, resumeFr: 'r', titreTraduction: 'Faille critique chez AT&T' },
+    { rubrique: 'Cyber', titre: 'Faille critique détectée', url: 'https://x/b', source: 'S',
+      datePublication: null, resumeFr: 'r', titreTraduction: 'Critical breach detected' }
+  ];
+  var html = genererHTML(config, items);
+
+  // Item EN : titre original présent (verbatim, échappé) + traduction affichée.
+  check(html.indexOf('Critical AT&amp;T breach') !== -1, 'titre EN original verbatim (échappé)');
+  check(html.indexOf('Faille critique chez AT&amp;T') !== -1, 'traduction FR affichée pour titre EN');
+  // Item FR : titre original présent, traduction (erronée de Claude) MASQUÉE.
+  check(html.indexOf('Faille critique détectée') !== -1, 'titre FR original présent');
+  check(html.indexOf('Critical breach detected') === -1, 'traduction masquée pour titre déjà FR');
+
+  Logger.log('--- testerTraductionTitre : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
+}
