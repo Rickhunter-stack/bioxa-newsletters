@@ -283,3 +283,46 @@ s'applique à une copie ; le champ `url` affiché reste l'original (lien source)
 - **Conversion de devise non gérée** : prix `_config` utilisés tels quels (défauts USD).
 - **Score : pas de borne native** côté API (structured outputs sans contraintes
   numériques) — borné en code.
+
+---
+
+## Correctif — bug « dernière source toujours inactive » (post-incr. 2)
+
+### Symptôme
+La **dernière ligne** du tableau Sources ressortait systématiquement avec
+`active: false`, quel que soit son contenu (1 source sur 3 jamais collectée,
+silencieusement).
+
+### Cause racine
+Sources (A-E) et Destinataires (G-I) **partagent la même ligne d'en-tête**, et le
+libellé **« Active »** y figure deux fois (colonne A et colonne G).
+`_localiserTableau_` mappait **toute la ligne** en *dernier-écrit-gagne* →
+`cols['active']` pointait sur la colonne **G** (Destinataires). `_lireSources_`
+lisait donc le `active` de chaque source dans la colonne G ; pour les lignes plus
+basses que la liste des destinataires (G vide), `_booleen_('')` = `false`.
+(Les Destinataires lisaient juste, mais **par chance** — ils voulaient la dernière
+occurrence.)
+
+### Correctif
+`_localiserTableau_` **scope les colonnes au segment contigu** de cellules non
+vides qui porte la signature (`_segmentsContigus_`), avec *premier-écrit-gagne*
+dans le segment. Sources → segment A-E (`active`→A) ; Destinataires → segment G-I
+(`active`→G). Robuste même si l'ordre des tableaux est inversé.
+
+### Limitation
+Il faut **au moins une colonne vide** entre les deux tableaux (la colonne F du
+template, garantie par `initialiserSheetDeConfig`). Si l'admin colle les deux
+tableaux sans séparation, ils fusionnent en un seul segment ; le *premier-écrit-
+gagne* donne alors quand même les bonnes colonnes du tableau de **gauche**.
+
+### Comportement déterministe en cas d'ambiguïté
+Si **plusieurs segments** portent la même signature (template cassé, tableau
+parasite), un **WARNING `[ambiguïté détectée]`** est loggé (signature + colonnes de
+début des segments candidats) et le **PREMIER segment** est retenu — comportement
+prévisible plutôt que silencieux.
+
+### Test de non-régression
+`testerLireTableauxColonnes` (offline) reproduit le scénario A-E / F vide / G-I,
+sources actives partout + destinataires partiellement remplis, et asserte que la
+**dernière source** ressort `active: true` (échouait avant le fix). Test symétrique
+sur les Destinataires + `testerLocaliserTableauAmbiguite` pour le garde-fou.

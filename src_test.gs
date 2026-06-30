@@ -170,6 +170,72 @@ function testerParseSortieClaude() {
 }
 
 /**
+ * Test OFFLINE de la lecture des tableaux Sources/Destinataires partageant la
+ * même ligne d'en-tête (régression du bug « dernière source toujours inactive »).
+ *
+ * Grille : Sources (A-E) + colonne F vide + Destinataires (G-I). La colonne
+ * `Active` figure en A (Sources) ET en G (Destinataires). On distingue les deux :
+ * chaque tableau doit lire SA propre colonne `Active`.
+ * @return {void}
+ */
+function testerLireTableauxColonnes() {
+  var echecs = 0;
+  function check(cond, libelle) {
+    if (!cond) { echecs++; Logger.log('FAIL: %s', libelle); }
+  }
+
+  // En-têtes : A-E Sources, F vide, G-I Destinataires.
+  var H = ['Active', 'Rubrique', 'Nom source', 'URL RSS', 'Filter keywords', '', 'Active', 'Email', 'Nom'];
+  // r1 : source active (A=true) / destinataire inactif (G=false)
+  var r1 = [true,  'Cyber', 'S1', 'https://a', '', '', false, 'a@x.com', 'A'];
+  // r2 : source inactive (A=false) / destinataire actif (G=true)
+  var r2 = [false, 'Cyber', 'S2', 'https://b', '', '', true,  'b@x.com', 'B'];
+  // r3 : 3e source active (A=true) ; PAS de 3e destinataire (G vide) → preuve du bug
+  var r3 = [true,  'IA',    'S3', 'https://c', '', '', '',    '',        ''];
+  var grille = [H, r1, r2, r3];
+
+  var sources = _lireSources_(grille, 'TEST');
+  check(sources.length === 3, 'sources.length = 3 (got ' + sources.length + ')');
+  check(sources[0] && sources[0].active === true, 'source[0].active = true (lit colonne A)');
+  check(sources[1] && sources[1].active === false, 'source[1].active = false (lit colonne A, pas G)');
+  check(sources[2] && sources[2].active === true, 'source[2].active = true (DERNIÈRE ligne — bug d\'origine)');
+  check(sources[2] && sources[2].nomSource === 'S3', 'source[2].nomSource = S3');
+  check(sources[2] && sources[2].rubrique === 'IA', 'source[2].rubrique = IA');
+
+  // Symétrie Destinataires : doivent lire la colonne G (Active dest).
+  var dests = _lireDestinataires_(grille, 'TEST');
+  check(dests.length === 2, 'dests.length = 2 (got ' + dests.length + ')');
+  check(dests[0] && dests[0].active === false && dests[0].email === 'a@x.com',
+    'dest[0] = {active:false, a@x.com} (lit colonne G)');
+  check(dests[1] && dests[1].active === true && dests[1].email === 'b@x.com',
+    'dest[1] = {active:true, b@x.com} (lit colonne G)');
+
+  Logger.log('--- testerLireTableauxColonnes : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
+}
+
+/**
+ * Test OFFLINE du garde-fou d'ambiguïté : deux segments contigus portent la même
+ * signature → warning attendu + PREMIER segment retenu (déterministe).
+ * @return {void}
+ */
+function testerLocaliserTableauAmbiguite() {
+  var echecs = 0;
+  // Deux tableaux Destinataires : A-C et E-G, séparés par la colonne D vide.
+  var H = ['Active', 'Email', 'Nom', '', 'Active', 'Email', 'Nom'];
+  var grille = [H];
+  var tab = _localiserTableau_(grille, ['email', 'nom'], 'TEST');
+
+  if (!tab.trouve) { echecs++; Logger.log('FAIL: tableau non trouvé'); }
+  // Premier segment retenu : email en colonne B (index 1), pas F (index 5).
+  if (!(tab.colonnes && tab.colonnes['email'] === 1)) {
+    echecs++; Logger.log('FAIL: premier segment non retenu (email index = %s, attendu 1)',
+      tab.colonnes && tab.colonnes['email']);
+  }
+  Logger.log('(Un WARNING [ambiguïté détectée] doit apparaître ci-dessus.)');
+  Logger.log('--- testerLocaliserTableauAmbiguite : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
+}
+
+/**
  * Test RÉEL du pré-filtre sur la newsletter DSI (réseau + clé API requis).
  * Pré-requis : onglet DSI rempli avec des sources actives, ANTHROPIC_API_KEY posée.
  * @return {void}
