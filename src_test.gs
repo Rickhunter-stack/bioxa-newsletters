@@ -476,3 +476,43 @@ function testerTraductionTitre() {
 
   Logger.log('--- testerTraductionTitre : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
 }
+
+/**
+ * Test OFFLINE du plafond par rubrique avant pré-filtre (borne du batch Claude).
+ * Rubrique > plafond → tronquée par date desc (sans-date écartés en premier) ;
+ * rubrique < plafond → inchangée ; rubrique PILE au plafond → inchangée + ordre
+ * d'origine préservé (vérifie l'inégalité STRICTE `> 25`).
+ * @return {void}
+ */
+function testerPlafondRubrique() {
+  var echecs = 0;
+  function check(cond, libelle) {
+    if (!cond) { echecs++; Logger.log('FAIL: %s', libelle); }
+  }
+  function d(n) { return new Date(2026, 0, n); }
+
+  var items = [];
+  // Over : 26 datés (jours 1..26) + 1 sans date = 27 > 25.
+  for (var i = 1; i <= 26; i++) { items.push({ rubrique: 'Over', titre: 'o' + i, datePublication: d(i) }); }
+  items.push({ rubrique: 'Over', titre: 'oNull', datePublication: null });
+  // Under : 8 < 25.
+  for (var j = 1; j <= 8; j++) { items.push({ rubrique: 'Under', titre: 'u' + j, datePublication: d(j) }); }
+  // Exact : 25 items, dates ASCENDANTES (ordre d'origine, pour détecter un tri indu).
+  for (var k = 1; k <= 25; k++) { items.push({ rubrique: 'Exact', titre: 'e' + k, datePublication: d(k) }); }
+
+  var res = plafonnerParRubrique(items);
+  function parRub(r) { return res.filter(function(x) { return x.rubrique === r; }); }
+  var over = parRub('Over'), under = parRub('Under'), exact = parRub('Exact');
+
+  check(over.length === 25, 'Over plafonné à 25 (got ' + over.length + ')');
+  check(over.every(function(x) { return x.datePublication !== null; }), 'Over : sans-date écartés en premier');
+  check(over[0].titre === 'o26', 'Over : trié par date desc (o26 en tête)');
+  check(!over.some(function(x) { return x.titre === 'o1'; }), 'Over : écarte le plus ancien (o1)');
+
+  check(under.length === 8, 'Under inchangé à 8');
+
+  check(exact.length === 25, 'Exact conservé à 25 (inégalité stricte)');
+  check(exact[0].titre === 'e1', 'Exact : ordre d\'origine préservé → pas de tri → inégalité STRICTE');
+
+  Logger.log('--- testerPlafondRubrique : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
+}
