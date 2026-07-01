@@ -599,3 +599,39 @@ d'URL** (`_historique`, incr. 2) suffit à écarter un éventuel doublon inter-s
 > (policy réseau, 403) et n'a pas de runtime Apps Script. La validité du flux (répond,
 > parse correctement, rubrique peuplée) doit être confirmée par l'admin via **`testerCollecte`**
 > après collage de la ligne dans l'onglet `DSI`.
+
+---
+
+## Incrément 7 — Refonte rendu + titre affiché en français
+
+### Changement de règle métier (demandé explicitement par le propriétaire)
+La règle « titre VERBATIM, traduction seulement en complément sous le titre » est **remplacée** :
+le **titre affiché** (texte du lien) devient la **traduction française** de Claude quand le
+titre original du flux n'est pas déjà français ; sinon le titre original. `CLAUDE.md` mis à
+jour en conséquence (règles métier + section « ne doit PAS faire »).
+
+**Invariants conservés** (non touchés) :
+- Le **lien** pointe toujours vers la **source originale** (jamais d'agrégateur/proxy).
+- La traduction doit rester **fidèle** (pas d'éditorialisation, ni ajout ni retrait d'info).
+- Le **titre original n'est jamais perdu** : conservé dans les données et exposé en **info-bulle**
+  (`title=`) du lien, pour la traçabilité (survol = titre du flux d'origine).
+- Repli : si aucune traduction (titre déjà FR, ou `titreTraduction` vide/null) → titre original.
+
+> **Écart PRD (HYP7)** : le PRD (figé par version) décrit encore le titre verbatim + traduction
+> additionnelle. Cet écart est **assumé et validé par le propriétaire** ; le PRD n'est pas modifié
+> ici (règle CLAUDE.md : le PRD se met à jour par version dans une révision dédiée). À reporter
+> lors de la prochaine révision du PRD.
+
+### Design (en-tête / pied / largeur)
+- **Marque plateforme** `NOM_ORGANISATION = 'Laboratoire BIOXA'` (constante `Code.gs`, partagée
+  par les 6 newsletters ; marque d'affichage, ni secret ni URL → pas de clé Sheet). Affichée en
+  *eyebrow* (majuscules espacées) dans l'en-tête coloré, et en gras dans le pied.
+- **Largeur desktop** : conteneur `max-width` 600 → **680px** (plus large sur ordinateur, sous le
+  plafond email-safe ~700px). Deux media queries : `≤680px` → conteneur pleine largeur ;
+  `≤600px` → colonnes méta (source/date) empilées.
+- En-tête et pied restylés (typographie, espacements, couleurs atténuées en rgba).
+
+### Reste à faire (bug séparé, non traité dans cet incrément)
+- **Encodage** : le flux « Le Monde Informatique - IA » sert ses accents en ISO-8859-1/Windows-1252 ;
+  la collecte les décode en UTF-8 → mojibake (`Traçabilité` → `Traï¿œabilitï¿œ`). Correctif charset
+  à faire dans `src_collecte.gs` (bugfix dédié).
