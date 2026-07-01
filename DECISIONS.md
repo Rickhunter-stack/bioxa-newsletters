@@ -556,7 +556,17 @@ reste donc un **jour de semaine** (pas un numéro de jour du mois), cohérent av
   peut, par drift, **sauter une heure d'horloge** et donc rater un envoi hebdo (une seule
   chance/semaine). Sur-échantillonner garantit que chaque `heure_envoi` est vue ; le garde-fou
   `_logs` rend le 2e passage inoffensif. Écart au « trigger horaire » proposé — justifié :
-  rater un envoi est pire qu'une lecture `_logs` supplémentaire. **À arbitrer si non souhaité.**
+  rater un envoi est pire qu'une lecture `_logs` supplémentaire. **Validé (arbitrage incr. 6).**
+
+  **Vérification quota (compte gratuit consumer).** 30 min → **48 déclenchements/jour**. Le
+  quota contraignant est le **temps d'exécution total des triggers = 90 min/jour** (+ 6 min max
+  par exécution) ; il n'existe pas de quota consumer séparé sur le *nombre* de déclenchements.
+  Charge estimée : un dispatch « à vide » (rien de dû, ~46-47 fois/jour) se limite à quelques
+  lectures `SpreadsheetApp` (`_newslettersActives_` + `lireConfig` + `_config`) → ~2-4 s
+  (`_estDueMaintenant_` sort en `false` sans lire `_logs`) ⇒ **~2,5 min/jour** d'overhead idle.
+  Un jour d'envoi ajoute **une** exécution lourde (collecte + poll batch ≤ 4 min + envoi) ≈ 5 min,
+  charge indépendante de l'intervalle. **Pire cas ~7-8 min/jour, soit > 10× sous les 90 min**, et
+  chaque exécution reste sous les 6 min. Passer de 60 à 30 min n'ajoute que ~1,3 min idle/jour.
 - **HYP6b — slot en échec non rejoué le jour même.** Le garde-fou `_logs` saute tout créneau
   déjà loggé *quel que soit le statut* (y compris `ERREUR`) : un run échoué n'est pas rejoué
   automatiquement dans la journée (l'opérateur relance à la main). Évite qu'un échec *après
