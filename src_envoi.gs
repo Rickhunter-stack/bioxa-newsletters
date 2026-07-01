@@ -98,7 +98,7 @@ function envoyerGmail(config, html, sujet) {
  */
 function _genererSujet_(config) {
   var nom = _texte_(config.nom) || _texte_(config.id);
-  var date = Utilities.formatDate(new Date(), 'Europe/Paris', 'dd/MM/yyyy');
+  var date = Utilities.formatDate(new Date(), FUSEAU_PLATEFORME, 'dd/MM/yyyy');
   return nom + ' — ' + date;
 }
 
@@ -149,7 +149,7 @@ function _htmlVersTexte_(html) {
 function _ecrireBrouillonDrive_(config, html) {
   try {
     var dossier = _obtenirDossierDrafts_();
-    var horodatage = Utilities.formatDate(new Date(), 'Europe/Paris', 'yyyy-MM-dd_HH-mm');
+    var horodatage = Utilities.formatDate(new Date(), FUSEAU_PLATEFORME, 'yyyy-MM-dd_HH-mm');
     var nom = 'dryrun-' + config.id + '-' + horodatage + '.html';
     var fichier = dossier.createFile(nom, html, MimeType.HTML);
     return fichier.getUrl();

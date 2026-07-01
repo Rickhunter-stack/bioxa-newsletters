@@ -79,10 +79,17 @@ function _initOngletConfig_(classeur) {
     ['admin_email', ''],
     ['dry_run_global', CONFIG_GLOBALE_DEFAUTS.dry_run_global],
     ['prix_input_per_million_tokens', CONFIG_GLOBALE_DEFAUTS.prix_input_per_million_tokens],
-    ['prix_output_per_million_tokens', CONFIG_GLOBALE_DEFAUTS.prix_output_per_million_tokens]
+    ['prix_output_per_million_tokens', CONFIG_GLOBALE_DEFAUTS.prix_output_per_million_tokens],
+    ['rapport_hebdo_jour', CONFIG_GLOBALE_DEFAUTS.rapport_hebdo_jour],
+    ['rapport_hebdo_heure', CONFIG_GLOBALE_DEFAUTS.rapport_hebdo_heure]
   ];
   _ecrireSheet_(classeur, ONGLET_CONFIG, 'A1', lignes, {
-    notes: { 'B5': 'À renseigner : email de l\'admin (rapports, alertes). Laissé vide par l\'init.' }
+    notes: {
+      'B5': 'À renseigner : email de l\'admin (rapports, alertes). Laissé vide par l\'init.',
+      'B9': 'Planification du rapport hebdo (S4), TRANSVERSE aux newsletters. ' +
+        'Jour en toutes lettres minuscules (lundi…dimanche). Interprété en Europe/Paris.',
+      'B10': 'Heure d\'envoi du rapport hebdo, entier 0–23. Interprété en Europe/Paris.'
+    }
   });
 }
 
@@ -118,7 +125,7 @@ function _initOngletLogs_(classeur) {
  * @private
  */
 function _initOngletDSI_(classeur) {
-  var aujourdhui = Utilities.formatDate(new Date(), 'Europe/Paris', 'yyyy-MM-dd');
+  var aujourdhui = Utilities.formatDate(new Date(), FUSEAU_PLATEFORME, 'yyyy-MM-dd');
 
   // Défauts applicables à TOUTE newsletter (pas de valeur spécifique DSI ici).
   var defautsSystemiques = {

@@ -507,3 +507,95 @@ Deux leviers bornent le volume envoyé au pré-filtre :
 Bascule vers l'**architecture asynchrone** (Option B, écartée en incr. 3) : un **trigger
 horaire `verifierBatchsPendants`** reprend les batchs Claude terminés hors du run, au lieu
 de poller synchroniquement dans les 6 min d'un run. Supprime la contrainte des 4 min.
+
+---
+
+## Incrément 6 — Triggers temporels (`src_triggers.gs`)
+
+### Modèle « dispatcher unique » (Option B retenue)
+UN seul trigger temporel appelle `executerNewsletterPlanifiee()`, qui lit la config et
+exécute les newsletters (et le rapport hebdo) **dues** à l'instant courant. Avantages vs
+« un trigger natif par newsletter » (Option A) : **1 seul trigger** (quota 20 confortable),
+**ajout d'une newsletter sans code** (un onglet actif suffit), cadence mensuelle gérée en
+code. Coût : la logique « qui est dû ? » vit dans le code, pas dans le trigger natif.
+
+### Découverte des newsletters
+Onglets **non préfixés `_`** dont la config résout `active === true` (`_newslettersActives_`).
+Un onglet résiduel (« Feuille 1 ») est écarté naturellement (config → `active=false`).
+
+### Rapport hebdo (S4) — clés dans `_config` GLOBAL
+`rapport_hebdo_jour` (défaut `lundi`) et `rapport_hebdo_heure` (défaut `8`) vivent dans
+l'onglet `_config` **transverse**, pas dans une newsletter : le rapport agrège toutes les
+newsletters et ne doit pas dépendre de l'état `active` de l'une d'elles. `admin_email` vide
+⇒ pas d'envoi (garde-fou existant), donc le défaut est sûr même non configuré.
+
+### Fuseau horaire — constante `FUSEAU_PLATEFORME` (`Europe/Paris`)
+`appsscript.json` est déjà en `Europe/Paris` (pas UTC). Le littéral, jusqu'ici dupliqué 4×
+(`src_envoi` ×2, `src_init`, `src_render`), est factorisé en **constante unique**
+`FUSEAU_PLATEFORME` (Code.gs), réutilisée par le dispatcher. Choix : **constante de code**
+(cohérente avec `appsscript.json`) plutôt que clé Sheet — un fuseau ne change jamais et une
+désync Sheet/manifest serait un piège. `jour_envoi`/`heure_envoi` sont donc interprétés en
+heure de Paris, conforme à l'attente de l'utilisateur de la Sheet.
+
+### Cadence `mensuel` — sémantique
+`mensuel` = **première occurrence** du `jour_envoi` dans le mois. La 1re occurrence d'un
+jour de semaine tombe toujours entre le 1 et le 7 → condition `jourDuMois <= 7`. `jour_envoi`
+reste donc un **jour de semaine** (pas un numéro de jour du mois), cohérent avec `hebdo`.
+
+### Garde-fous double-déclenchement (un trigger Apps Script *drifte*)
+1. **`LockService`** : `executerNewsletterPlanifiee` prend un verrou script (`tryLock` 30 s).
+   Deux dispatches concurrents ne peuvent pas s'exécuter ensemble.
+2. **Contrôle `_logs`** (`_aDejaTourneAujourdhui_` / cœur pur `_creneauDejaServi_`) : on saute
+   une newsletter (ou le rapport, id réservé `_rapport_hebdo`) déjà loggée aujourd'hui à cette
+   `heure_envoi` → **pas de double coût Claude ni de double envoi Gmail**. Contrôle **en amont**
+   de la collecte (skip = zéro coût).
+
+### HYP / écarts assumés
+- **HYP6a — échantillonnage 30 min, pas 60.** Le trigger tire toutes les **30 min**
+  (`INTERVALLE_DISPATCH_MIN`) et non toutes les heures : un trigger « horaire » Apps Script
+  peut, par drift, **sauter une heure d'horloge** et donc rater un envoi hebdo (une seule
+  chance/semaine). Sur-échantillonner garantit que chaque `heure_envoi` est vue ; le garde-fou
+  `_logs` rend le 2e passage inoffensif. Écart au « trigger horaire » proposé — justifié :
+  rater un envoi est pire qu'une lecture `_logs` supplémentaire. **Validé (arbitrage incr. 6).**
+
+  **Vérification quota (compte gratuit consumer).** 30 min → **48 déclenchements/jour**. Le
+  quota contraignant est le **temps d'exécution total des triggers = 90 min/jour** (+ 6 min max
+  par exécution) ; il n'existe pas de quota consumer séparé sur le *nombre* de déclenchements.
+  Charge estimée : un dispatch « à vide » (rien de dû, ~46-47 fois/jour) se limite à quelques
+  lectures `SpreadsheetApp` (`_newslettersActives_` + `lireConfig` + `_config`) → ~2-4 s
+  (`_estDueMaintenant_` sort en `false` sans lire `_logs`) ⇒ **~2,5 min/jour** d'overhead idle.
+  Un jour d'envoi ajoute **une** exécution lourde (collecte + poll batch ≤ 4 min + envoi) ≈ 5 min,
+  charge indépendante de l'intervalle. **Pire cas ~7-8 min/jour, soit > 10× sous les 90 min**, et
+  chaque exécution reste sous les 6 min. Passer de 60 à 30 min n'ajoute que ~1,3 min idle/jour.
+- **HYP6b — slot en échec non rejoué le jour même.** Le garde-fou `_logs` saute tout créneau
+  déjà loggé *quel que soit le statut* (y compris `ERREUR`) : un run échoué n'est pas rejoué
+  automatiquement dans la journée (l'opérateur relance à la main). Évite qu'un échec *après
+  envoi* provoque un double-envoi.
+- Le rapport hebdo écrit une ligne `_logs` (`newsletter = _rapport_hebdo`, `nb_* = 0`) pour
+  armer son garde-fou. Effet de bord mineur : `envoyerRapportHebdo` compte ces lignes dans son
+  `nbRuns` (coût/envois inchangés car à 0).
+
+### Test manuel
+- Offline : **`testerTriggersDispatch`** (décision `_estDueMaintenant_` hebdo/mensuel + cas
+  limites, garde-fou `_creneauDejaServi_`) — aucun trigger créé, aucune Sheet touchée.
+- Réel : **`installerTriggers`** (crée le trigger de dispatch), **`supprimerTriggers`** (purge).
+
+---
+
+## Sources DSI — ANSSI institutionnel vs CERT-FR (ajout post-incr. 6)
+
+Ajout d'une source **institutionnelle** ANSSI (référentiels, publications, événements),
+**distincte** du fil technique CERT-FR (alertes/avis de vulnérabilités) déjà présent :
+
+| Active | Rubrique | Nom source | URL RSS | Filter keywords |
+|---|---|---|---|---|
+| `TRUE` | `Cybersécurité` | `ANSSI - Actualités` | `https://cyber.gouv.fr/actualites/rss/` | |
+
+Les deux flux couvrent des contenus de nature différente (institutionnel vs alertes
+techniques) ; un chevauchement est peu probable, et la **déduplication globale par hash
+d'URL** (`_historique`, incr. 2) suffit à écarter un éventuel doublon inter-sources.
+
+> ⚠️ **Non vérifié en CI** : l'environnement d'exécution Claude Code **bloque `cyber.gouv.fr`**
+> (policy réseau, 403) et n'a pas de runtime Apps Script. La validité du flux (répond,
+> parse correctement, rubrique peuplée) doit être confirmée par l'admin via **`testerCollecte`**
+> après collage de la ligne dans l'onglet `DSI`.

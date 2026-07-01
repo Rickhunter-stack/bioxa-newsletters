@@ -26,7 +26,8 @@ Le pipeline (collecte → pré-filtre → scoring → rendu → envoi) arrive au
 | `src_render.gs` | `genererHTML(config, items)` — rendu HTML email responsive (PRD M5/M7), pur/offline |
 | `src_envoi.gs` | `livrerNewsletter` / `envoyerGmail` — dry-run Drive (S1) + envoi Gmail réel (M6) |
 | `src_logs.gs` | `ecrireHistorique` (P4) / `logRun` (P5) / `envoyerMailAdmin` (P6) / `envoyerRapportHebdo` (S4) |
-| `src_test.gs` | Tests manuels (init, lireConfig, canonicalisation, collecte, dédup, parse Claude, rendu HTML offline, dry-run) |
+| `src_triggers.gs` | `installerTriggers` / `executerNewsletterPlanifiee` (dispatcher) / `supprimerTriggers` — planification temporelle (incr. 6) |
+| `src_test.gs` | Tests manuels (init, lireConfig, canonicalisation, collecte, dédup, parse Claude, rendu HTML offline, dry-run, plafond, triggers) |
 | `appsscript.json` | Manifest (timezone Europe/Paris, runtime V8) |
 | `DECISIONS.md` | Décisions implicites (clés exactes, tokens, formats) + exemples de remplissage DSI |
 
@@ -44,6 +45,8 @@ En-têtes ligne 1 : `Clé | Valeur`. Une ligne par paramètre.
 | `dry_run_global` | `FALSE` | bool | Bascule globale dry-run |
 | `prix_input_per_million_tokens` | `1` | number | Prix input Haiku 4.5 (USD/M, estimation coût) |
 | `prix_output_per_million_tokens` | `5` | number | Prix output Haiku 4.5 (USD/M, estimation coût) |
+| `rapport_hebdo_jour` | `lundi` | string | Jour d'envoi du rapport hebdo S4 (transverse, Europe/Paris) |
+| `rapport_hebdo_heure` | `8` | number | Heure d'envoi du rapport hebdo S4 (0–23, Europe/Paris) |
 
 > La **clé API Anthropic** n'est PAS dans la Sheet : elle est stockée dans
 > `PropertiesService.getScriptProperties()` sous `ANTHROPIC_API_KEY`. Elle est
@@ -88,7 +91,8 @@ Conventions de remplissage (clés exactes, tokens booléens, formats) : `DECISIO
 ```js
 {
   id: "DSI",
-  global: { claudeModel, claudeApiEndpoint, gmailQuotaJour, adminEmail, dryRunGlobal },
+  global: { claudeModel, claudeApiEndpoint, gmailQuotaJour, adminEmail, dryRunGlobal,
+            prixInputParMillion, prixOutputParMillion, rapportHebdoJour, rapportHebdoHeure },
   nom, referentMetier, jourEnvoi, heureEnvoi, cadence,
   nItemsParRubrique, couleur, sousTitre, active,
   promptSysteme, promptVersion,            // version extraite de la 1re ligne "# v…"
@@ -141,6 +145,12 @@ sauf si la Sheet ou l'onglet de la newsletter est totalement introuvable.
     FR additive des titres (détection de langue + affichage conditionnel ; titre original verbatim).
 16. **`testerPlafondRubrique`** : test **offline** du plafond par rubrique avant pré-filtre
     (troncature date desc si > 25, inchangé sinon, inégalité stricte, sans-date écartés d'abord).
+17. **`testerTriggersDispatch`** : test **offline** de la décision de planification (incr. 6) —
+    `_estDueMaintenant_` (hebdo bon/mauvais jour+heure, mensuel 1re occurrence vs 2e, config
+    incomplète, minuit) et garde-fou double-run `_creneauDejaServi_`. Aucun trigger créé.
+18. **`installerTriggers`** (crée l'unique trigger de dispatch, toutes les 30 min) /
+    **`supprimerTriggers`** (purge). ⚠️ Créent/suppriment de **vrais triggers** ; à lancer
+    une fois la config des newsletters (`jour_envoi`/`heure_envoi`/`active`) finalisée.
 
 ## Secrets
 

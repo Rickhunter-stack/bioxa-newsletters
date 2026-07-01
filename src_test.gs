@@ -516,3 +516,49 @@ function testerPlafondRubrique() {
 
   Logger.log('--- testerPlafondRubrique : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
 }
+
+/**
+ * Test OFFLINE de la décision de planification (incr. 6). Vérifie les fonctions
+ * PURES du dispatcher, sans créer de vrai trigger ni toucher la Sheet :
+ *  - `_estDueMaintenant_` : hebdo (bon/mauvais jour, bonne/mauvaise heure), mensuel
+ *    (1re occurrence vs 2e), config incomplète, heure 0 (minuit) ;
+ *  - `_creneauDejaServi_` : garde-fou double-run (même newsletter/jour/heure).
+ * @return {void}
+ */
+function testerTriggersDispatch() {
+  var echecs = 0;
+  function check(cond, libelle) {
+    if (!cond) { echecs++; Logger.log('FAIL: %s', libelle); }
+  }
+
+  // --- _estDueMaintenant_ : cadence hebdo ---
+  var hebdo = { id: 'DSI', jourEnvoi: 'Lundi', heureEnvoi: 8, cadence: 'hebdo' };
+  check(_estDueMaintenant_(hebdo, 'lundi', 8, 1) === true, 'hebdo bon jour+heure → due (casse tolérée)');
+  check(_estDueMaintenant_(hebdo, 'mardi', 8, 2) === false, 'hebdo mauvais jour → pas due');
+  check(_estDueMaintenant_(hebdo, 'lundi', 9, 1) === false, 'hebdo mauvaise heure → pas due');
+
+  // --- _estDueMaintenant_ : cadence mensuel (1re occurrence du jour = jourDuMois <= 7) ---
+  var mensuel = { id: 'RH', jourEnvoi: 'jeudi', heureEnvoi: 7, cadence: 'mensuel' };
+  check(_estDueMaintenant_(mensuel, 'jeudi', 7, 3) === true, 'mensuel 1re occurrence (jour 3) → due');
+  check(_estDueMaintenant_(mensuel, 'jeudi', 7, 7) === true, 'mensuel jour 7 (limite 1re occurrence) → due');
+  check(_estDueMaintenant_(mensuel, 'jeudi', 7, 8) === false, 'mensuel jour 8 (> 7) → pas due');
+  check(_estDueMaintenant_(mensuel, 'jeudi', 7, 10) === false, 'mensuel 2e occurrence (jour 10) → pas due');
+
+  // --- _estDueMaintenant_ : cas limites ---
+  var incomplet = { id: 'X', jourEnvoi: '', heureEnvoi: null, cadence: 'hebdo' };
+  check(_estDueMaintenant_(incomplet, 'lundi', 8, 1) === false, 'config incomplète (jour/heure vides) → jamais due');
+  var minuit = { id: 'Z', jourEnvoi: 'dimanche', heureEnvoi: 0, cadence: 'hebdo' };
+  check(_estDueMaintenant_(minuit, 'dimanche', 0, 6) === true, 'heure 0 (minuit) valide → due (pas confondue avec absente)');
+
+  // --- _creneauDejaServi_ : garde-fou double-run ---
+  var creneaux = [
+    { newsletter: 'DSI', jour: '2026-07-06', heure: 8 },
+    { newsletter: 'RH', jour: '2026-07-06', heure: 7 }
+  ];
+  check(_creneauDejaServi_(creneaux, 'DSI', '2026-07-06', 8) === true, 'DSI déjà servie ce créneau → skip');
+  check(_creneauDejaServi_(creneaux, 'DSI', '2026-07-06', 9) === false, 'DSI autre heure même jour → pas skip');
+  check(_creneauDejaServi_(creneaux, 'DSI', '2026-07-07', 8) === false, 'DSI autre jour → pas skip');
+  check(_creneauDejaServi_(creneaux, 'Qualite', '2026-07-06', 8) === false, 'autre newsletter → pas skip');
+
+  Logger.log('--- testerTriggersDispatch : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
+}
