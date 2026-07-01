@@ -200,7 +200,7 @@ function _echapperHtml_(s) {
  * @private
  */
 function _formaterDateFr_(date) {
-  return Utilities.formatDate(date, 'Europe/Paris', 'dd/MM/yyyy');
+  return Utilities.formatDate(date, FUSEAU_PLATEFORME, 'dd/MM/yyyy');
 }
 
 /**

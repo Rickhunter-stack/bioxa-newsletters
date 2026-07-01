@@ -43,6 +43,14 @@ var NOM_EXPEDITEUR = 'BIOXA Veille';
 /** Quota Gmail journalier par défaut si absent de _config (compte gratuit). */
 var GMAIL_QUOTA_DEFAUT = 100;
 
+/**
+ * Fuseau horaire de la plateforme. Source unique pour l'affichage des dates ET la
+ * planification des triggers (jour_envoi/heure_envoi interprétés ici). Doit rester
+ * cohérent avec `appsscript.json` ("timeZone"). Un fuseau n'est ni secret ni URL :
+ * il a sa place en constante de code (pas de clé Sheet — éviter une désync).
+ */
+var FUSEAU_PLATEFORME = 'Europe/Paris';
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Entry points par newsletter (appelés par les triggers temporels, incr. 6).
  * ────────────────────────────────────────────────────────────────────────── */

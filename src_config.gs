@@ -21,7 +21,9 @@ var CONFIG_GLOBALE_DEFAUTS = {
   admin_email: '',
   dry_run_global: false,
   prix_input_per_million_tokens: 1,
-  prix_output_per_million_tokens: 5
+  prix_output_per_million_tokens: 5,
+  rapport_hebdo_jour: 'lundi',
+  rapport_hebdo_heure: 8
 };
 
 /**
@@ -50,7 +52,8 @@ var PARAMS_NEWSLETTER = [
  *   id: string,
  *   global: {claudeModel: string, claudeApiEndpoint: string, gmailQuotaJour: number,
  *            adminEmail: string, dryRunGlobal: boolean,
- *            prixInputParMillion: number, prixOutputParMillion: number},
+ *            prixInputParMillion: number, prixOutputParMillion: number,
+ *            rapportHebdoJour: string, rapportHebdoHeure: number},
  *   nom: string, referentMetier: string, jourEnvoi: string, heureEnvoi: ?number,
  *   cadence: string, nItemsParRubrique: number, couleur: string, sousTitre: string,
  *   active: boolean, promptSysteme: ?string, promptVersion: ?string,
@@ -172,7 +175,8 @@ function _lireColonneOnglet_(nomOnglet, nomColonne) {
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} classeur
  * @return {{claudeModel: string, claudeApiEndpoint: string, gmailQuotaJour: number,
  *           adminEmail: string, dryRunGlobal: boolean,
- *           prixInputParMillion: number, prixOutputParMillion: number}}
+ *           prixInputParMillion: number, prixOutputParMillion: number,
+ *           rapportHebdoJour: string, rapportHebdoHeure: number}}
  * @private
  */
 function _lireConfigGlobale_(classeur) {
@@ -207,7 +211,9 @@ function _lireConfigGlobale_(classeur) {
     adminEmail: typer('admin_email', 'string'),
     dryRunGlobal: typer('dry_run_global', 'bool'),
     prixInputParMillion: typer('prix_input_per_million_tokens', 'number'),
-    prixOutputParMillion: typer('prix_output_per_million_tokens', 'number')
+    prixOutputParMillion: typer('prix_output_per_million_tokens', 'number'),
+    rapportHebdoJour: typer('rapport_hebdo_jour', 'string'),
+    rapportHebdoHeure: typer('rapport_hebdo_heure', 'number')
   };
 }
 
