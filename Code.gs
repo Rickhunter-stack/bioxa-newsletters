@@ -83,8 +83,11 @@ function executerNewsletter(idNewsletter, options) {
     var dedup = dedoublonner(collecte.items, idNewsletter);
     compteurs.nbCollectes = collecte.items.length;
 
+    // Plafond par rubrique APRÈS dédup, AVANT pré-filtre (borne le batch Claude).
+    var plafonnes = plafonnerParRubrique(dedup.retenus);
+
     // Pré-filtre IA (M3) PUIS scoring + résumé (M4).
-    var pre = prefilterTitres(dedup.retenus, config);
+    var pre = prefilterTitres(plafonnes, config);
     compteurs.nbPreFiltres = pre.items.length;
     var sco = scorerEtResumer(pre.items, config);
     compteurs.nbScores = sco.items.length;

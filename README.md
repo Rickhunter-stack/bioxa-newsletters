@@ -139,6 +139,8 @@ sauf si la Sheet ou l'onglet de la newsletter est totalement introuvable.
     (envoie le récap hebdo S4 à `admin_email`). Réseau + `ANTHROPIC_API_KEY` requis.
 15. **`testerEstFrancais`** / **`testerTraductionTitre`** : tests **offline** de la traduction
     FR additive des titres (détection de langue + affichage conditionnel ; titre original verbatim).
+16. **`testerPlafondRubrique`** : test **offline** du plafond par rubrique avant pré-filtre
+    (troncature date desc si > 25, inchangé sinon, inégalité stricte, sans-date écartés d'abord).
 
 ## Secrets
 

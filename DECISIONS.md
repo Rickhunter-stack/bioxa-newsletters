@@ -481,3 +481,29 @@ Traité comme `null` → **aucune traduction affichée**, item rendu normalement
 Détection de langue **rudimentaire** (accents + mots fréquents) : un titre anglais sans
 accent contenant par coïncidence ≥ 2 tokens ressemblant à des mots FR pourrait être
 classé FR à tort (rare). Suffisant pour la v1.
+
+---
+
+## Dette technique — latence du batch pré-filtre (post-incr. 5)
+
+### Contrainte
+Le pré-filtre repose sur un **batch synchrone borné à 4 min de polling** (Option A,
+incr. 3). Au-delà, le run est **annulé proprement** (garde-fou). Observé en prod :
+DSI passée de 3 à 12 sources → **232 items** → batch de 222 requêtes **> 4 min** → run annulé.
+
+### Solution transitoire (retenue — fix pragmatique, pas de refactor)
+Deux leviers bornent le volume envoyé au pré-filtre :
+1. **Fenêtre de collecte `FENETRE_JOURS_HEBDO` = 3 j** (au lieu de 7). ~232 → ~100 items.
+   **⚠️ Dépendance éditoriale** (documentée aussi en commentaire dans `src_collecte.gs`) :
+   3 jours ne tient QUE si le run est déclenché un **jour fixe hebdomadaire** (trigger
+   temporel, **incr. 6**). Tant que ce trigger n'existe pas, un **run manuel espacé de
+   > 3 j** du précédent crée un **trou de couverture silencieux** (items J-7 à J-3 jamais vus).
+2. **`PLAFOND_ITEMS_PAR_RUBRIQUE_AVANT_PREFILTRE` = 25** (`plafonnerParRubrique`,
+   appliqué APRÈS dédup + split par rubrique) : par rubrique, si volume **> 25** (strict),
+   tri date desc + troncature (sans-date écartés en premier) ; sinon inchangé. Log **par
+   rubrique**. 5 rubriques → **max 125 items** au pré-filtre (vs 222).
+
+### Solution long terme (à faire quand le volume dépasse ~300 items)
+Bascule vers l'**architecture asynchrone** (Option B, écartée en incr. 3) : un **trigger
+horaire `verifierBatchsPendants`** reprend les batchs Claude terminés hors du run, au lieu
+de poller synchroniquement dans les 6 min d'un run. Supprime la contrainte des 4 min.

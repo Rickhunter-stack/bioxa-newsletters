@@ -10,9 +10,27 @@
  * Aucun appel Claude ici (incr. 3). Aucune écriture Sheet ici (incr. 5).
  */
 
-/** Fenêtre temporelle (jours) selon la cadence. */
-var FENETRE_JOURS_HEBDO = 7;
+/**
+ * Fenêtre temporelle (jours) selon la cadence.
+ *
+ * ⚠️ DÉPENDANCE ÉDITORIALE — FENETRE_JOURS_HEBDO = 3 (réduit de 7 pour borner le
+ * volume envoyé au pré-filtre, cf. DECISIONS.md « dette latence batch »). Cette
+ * valeur de 3 jours ne tient QUE si le run est déclenché un JOUR FIXE hebdomadaire
+ * (trigger temporel, incrément 6). TANT QUE ce trigger n'existe pas, tout run
+ * MANUEL espacé de plus de 3 jours du run précédent crée un TROU DE COUVERTURE
+ * SILENCIEUX : les items publiés entre J-7 et J-3 ne sont jamais vus. Ne pas
+ * augmenter la cadence manuelle sans repasser à 7, ou attendre l'incr. 6.
+ */
+var FENETRE_JOURS_HEBDO = 3;
 var FENETRE_JOURS_MENSUEL = 30;
+
+/**
+ * Plafond d'items par rubrique envoyés au pré-filtre (borne la taille du batch
+ * Claude sous le budget de poll 4 min, cf. DECISIONS.md). Appliqué APRÈS la dédup
+ * et APRÈS le split par rubrique, jamais avant (sinon la dédup perdrait des items).
+ * Inégalité STRICTE : une rubrique pile à ce nombre n'est ni tronquée ni loggée.
+ */
+var PLAFOND_ITEMS_PAR_RUBRIQUE_AVANT_PREFILTRE = 25;
 
 /** Nombre max d'URL par appel fetchAll (limite Apps Script). */
 var MAX_SOURCES_PAR_LOT = 100;
@@ -146,6 +164,56 @@ function collecterItems(idNewsletter, config) {
     },
     sourcesSansDate: sourcesSansDate
   };
+}
+
+/**
+ * Plafonne le nombre d'items PAR RUBRIQUE avant le pré-filtre (borne la taille du
+ * batch Claude). À appeler APRÈS dedoublonner (jamais avant : la dédup ne doit pas
+ * perdre d'items via un tri prématuré) et AVANT prefilterTitres.
+ *
+ * Pour chaque rubrique : si (et seulement si) son volume DÉPASSE STRICTEMENT le
+ * plafond, tri par date décroissante (items sans date en dernier → écartés en
+ * premier) puis troncature. Sinon la rubrique est laissée inchangée (aucun tri,
+ * aucun biais). Un log est émis pour CHAQUE rubrique.
+ *
+ * @param {Array.<Object>} items Items dédupliqués.
+ * @return {Array.<Object>} Items plafonnés (concaténation des rubriques).
+ */
+function plafonnerParRubrique(items) {
+  var parRubrique = {};
+  (items || []).forEach(function(it) {
+    var r = it.rubrique || '';
+    if (!parRubrique[r]) { parRubrique[r] = []; }
+    parRubrique[r].push(it);
+  });
+
+  var sortie = [];
+  for (var rubrique in parRubrique) {
+    if (!Object.prototype.hasOwnProperty.call(parRubrique, rubrique)) { continue; }
+    var liste = parRubrique[rubrique];
+    var avant = liste.length;
+    if (avant > PLAFOND_ITEMS_PAR_RUBRIQUE_AVANT_PREFILTRE) { // inégalité STRICTE
+      liste = liste.slice().sort(_parDateDesc_).slice(0, PLAFOND_ITEMS_PAR_RUBRIQUE_AVANT_PREFILTRE);
+      Logger.log('[plafond] %s : %s → %s (%s écartés)', rubrique, avant, liste.length, avant - liste.length);
+    } else {
+      Logger.log('[plafond] %s : %s → %s (inchangé)', rubrique, avant, avant);
+    }
+    sortie = sortie.concat(liste);
+  }
+  return sortie;
+}
+
+/**
+ * Comparateur : date de publication décroissante ; items sans date en dernier.
+ * @param {Object} a
+ * @param {Object} b
+ * @return {number}
+ * @private
+ */
+function _parDateDesc_(a, b) {
+  var ta = a.datePublication ? a.datePublication.getTime() : -Infinity;
+  var tb = b.datePublication ? b.datePublication.getTime() : -Infinity;
+  return tb - ta;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
