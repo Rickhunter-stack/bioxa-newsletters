@@ -613,13 +613,24 @@ function testerDetecterCharset() {
   check(_scoreMojibake_('d' + fffd + 'j' + fffd) === 2, 'U+FFFD comptés (Latin-1 lu en UTF-8)');
   check(_scoreMojibake_('dÃ©veloppeurs bientÃ´t') === 2, 'signature double-décodage comptée (UTF-8 lu en 1252)');
 
-  // 7. Choix du décodage : ne JAMAIS corrompre un UTF-8 déjà correct (faux positif PR #14).
-  check(_choisirDecodage_('développeurs bientôt', 'dÃ©veloppeurs bientÃ´t') === 'développeurs bientôt',
-    'UTF-8 propre conservé (pas de bascule 1252)');
-  check(_choisirDecodage_('d' + fffd + 'j' + fffd, 'déjà') === 'déjà',
+  // 7. Choix du meilleur décodage parmi candidats (score minimal, 1er = déclaré).
+  //    (a) UTF-8 propre conservé — pas de faux positif (régression PR #14).
+  check(_choisirMeilleurDecodage_(['développeurs bientôt', 'dÃ©veloppeurs bientÃ´t']) === 'développeurs bientôt',
+    'UTF-8 propre conservé (pas de bascule)');
+  //    (b) Latin-1 pur → bascule 1252.
+  check(_choisirMeilleurDecodage_(['d' + fffd + 'j' + fffd, 'déjà']) === 'déjà',
     'Latin-1 pur → bascule 1252 (fix d\'origine préservé)');
-  check(_choisirDecodage_('développeurs ' + fffd + ' bientôt', 'dÃ©veloppeurs é bientÃ´t') === 'développeurs ' + fffd + ' bientôt',
-    'mixte → garder UTF-8 (1 char perdu) plutôt que tout corrompre');
+  //    (c) mixte → garder UTF-8 (1 char perdu) plutôt que tout corrompre.
+  check(_choisirMeilleurDecodage_(['développeurs ' + fffd + ' bientôt', 'dÃ©veloppeurs é bientÃ´t']) === 'développeurs ' + fffd + ' bientôt',
+    'mixte → garder UTF-8');
+  //    (d) double-encodé à la source → choisir le candidat un-double-encodé.
+  check(_choisirMeilleurDecodage_(['dÃ©veloppeurs bientÃ´t', 'développeurs bientôt']) === 'développeurs bientôt',
+    'double-encodé → candidat un-double-encodé retenu');
+
+  // 8. _demojibake_ : inverse le double-encodage ; null si hors Latin-1.
+  check(_demojibake_('dÃ©veloppeurs bientÃ´t') === 'développeurs bientôt', 'demojibake corrige « Ã© »');
+  check(_demojibake_('Â« spÃ©cifications Â»') === '« spécifications »', 'demojibake corrige « Â« »');
+  check(_demojibake_('texte propre sans accent') === 'texte propre sans accent', 'demojibake neutre sur ASCII');
 
   Logger.log('--- testerDetecterCharset : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
 }
