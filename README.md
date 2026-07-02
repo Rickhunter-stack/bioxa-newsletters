@@ -152,6 +152,9 @@ sauf si la Sheet ou l'onglet de la newsletter est totalement introuvable.
 18. **`installerTriggers`** (crée l'unique trigger de dispatch, toutes les 30 min) /
     **`supprimerTriggers`** (purge). ⚠️ Créent/suppriment de **vrais triggers** ; à lancer
     une fois la config des newsletters (`jour_envoi`/`heure_envoi`/`active`) finalisée.
+19. **`testerDetecterCharset`** : test **offline** de la détection de charset à la collecte
+    (fix mojibake accents FR) — en-tête HTTP prioritaire, repli déclaration XML puis UTF-8,
+    liste blanche `utf-8`/`iso-8859-1`/`windows-1252`.
 
 ## Secrets
 

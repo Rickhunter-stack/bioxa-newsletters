@@ -634,4 +634,28 @@ jour en conséquence (règles métier + section « ne doit PAS faire »).
 ### Reste à faire (bug séparé, non traité dans cet incrément)
 - **Encodage** : le flux « Le Monde Informatique - IA » sert ses accents en ISO-8859-1/Windows-1252 ;
   la collecte les décode en UTF-8 → mojibake (`Traçabilité` → `Traï¿œabilitï¿œ`). Correctif charset
-  à faire dans `src_collecte.gs` (bugfix dédié).
+  à faire dans `src_collecte.gs` (bugfix dédié). → **CORRIGÉ** (voir ci-dessous).
+
+---
+
+## Bugfix encodage — détection de charset à la collecte
+
+### Cause
+`response.getContentText()` sans argument décode en **UTF-8**. Un flux servi en **ISO-8859-1 /
+Windows-1252** (fréquent côté FR, ex. Le Monde Informatique) produit alors du mojibake sur les
+accents (« é » → « � » / `ï¿œ`).
+
+### Correctif (`src_collecte.gs`, ciblé)
+- **`_detecterCharset_(contentType, prolog)`** (PUR, testable offline) : priorité **en-tête HTTP
+  `Content-Type`** (`charset=…`), puis **déclaration XML** (`encoding="…"`), défaut **UTF-8**.
+  Liste blanche `CHARSETS_SUPPORTES` = `utf-8` / `iso-8859-1` / `windows-1252` ; tout autre → UTF-8.
+- **`_lireCorpsReponse_(response)`** (I/O) : lit `Content-Type` (`getAllHeaders`), « sniffe » le
+  prolog en **Latin-1** (mapping octet→char 1:1, ne casse jamais), détecte le charset, puis
+  `getContentText(charset)`. **Jamais d'exception** : tout échec retombe sur `getContentText()` UTF-8.
+- Branché aux **2** points de lecture : lot `fetchAll` + repli séquentiel.
+- **Pas de rétro-correction** de `_historique` : le fix agit à la source, l'aval est corrigé aux
+  prochains runs.
+
+### Test offline
+`testerDetecterCharset` (OK) : header charset ; prolog XML en repli ; header+prolog absents → UTF-8 ;
+charset exotique → UTF-8 ; priorité header > prolog.

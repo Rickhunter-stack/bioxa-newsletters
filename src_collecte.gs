@@ -247,7 +247,7 @@ function _recupererFlux_(sources, debutFetch) {
       try {
         resultats.push({
           source: lot[j], code: reponses[j].getResponseCode(),
-          body: reponses[j].getContentText(), erreur: null
+          body: _lireCorpsReponse_(reponses[j]), erreur: null
         });
       } catch (eRep) {
         resultats.push({ source: lot[j], code: 0, body: '', erreur: 'lecture réponse : ' + eRep.message });
@@ -279,11 +279,79 @@ function _fetchSequentiel_(lot, debutFetch, resultats) {
     var s = lot[k];
     try {
       var rep = UrlFetchApp.fetch(s.urlRss, { muteHttpExceptions: true, followRedirects: true });
-      resultats.push({ source: s, code: rep.getResponseCode(), body: rep.getContentText(), erreur: null });
+      resultats.push({ source: s, code: rep.getResponseCode(), body: _lireCorpsReponse_(rep), erreur: null });
     } catch (e) {
       resultats.push({ source: s, code: 0, body: '', erreur: 'fetch : ' + e.message });
     }
   }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Décodage du corps de réponse selon le charset (fix mojibake accents FR).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Charsets supportés (liste blanche). Tout autre nom → repli UTF-8. @const */
+var CHARSETS_SUPPORTES = { 'utf-8': 'UTF-8', 'iso-8859-1': 'ISO-8859-1', 'windows-1252': 'windows-1252' };
+
+/**
+ * Lit le corps d'une réponse en le décodant avec le BON charset.
+ *
+ * `getContentText()` sans argument décode en UTF-8 ; un flux servi en
+ * ISO-8859-1/Windows-1252 (fréquent côté FR) produit alors du mojibake sur les
+ * accents (« é » → « ï¿œ »). On détecte donc le charset (en-tête HTTP puis
+ * déclaration XML), et on re-décode en conséquence. Jamais d'exception : tout
+ * échec retombe sur UTF-8.
+ *
+ * @param {GoogleAppsScript.URL_Fetch.HTTPResponse} response
+ * @return {string} Corps décodé.
+ * @private
+ */
+function _lireCorpsReponse_(response) {
+  try {
+    var contentType = '';
+    try {
+      var headers = response.getAllHeaders() || {};
+      contentType = headers['Content-Type'] || headers['content-type'] || '';
+    } catch (eH) {
+      contentType = '';
+    }
+    // Sniff du prolog XML en Latin-1 (mapping octet→char 1:1, ne casse jamais).
+    var prolog = '';
+    try {
+      prolog = response.getContentText('ISO-8859-1').substring(0, 200);
+    } catch (eP) {
+      prolog = '';
+    }
+    var charset = _detecterCharset_(contentType, prolog);
+    return response.getContentText(charset);
+  } catch (e) {
+    Logger.log('[collecte][WARN] Décodage charset impossible, repli UTF-8 : %s', e.message);
+    return response.getContentText();
+  }
+}
+
+/**
+ * Détermine le charset à utiliser (PUR, testable offline). Priorité : en-tête
+ * HTTP Content-Type, puis déclaration XML `encoding="..."`, puis UTF-8. Le nom
+ * détecté est validé contre CHARSETS_SUPPORTES (sinon UTF-8).
+ *
+ * @param {string} contentType Valeur de l'en-tête Content-Type (peut être vide).
+ * @param {string} prolog Début du document (déclaration XML éventuelle).
+ * @return {string} Nom de charset canonique accepté par getContentText.
+ * @private
+ */
+function _detecterCharset_(contentType, prolog) {
+  var m = _texte_(contentType).match(/charset\s*=\s*["']?([^"';\s]+)/i);
+  if (!m) {
+    m = _texte_(prolog).match(/encoding\s*=\s*["']([^"']+)["']/i);
+  }
+  if (m) {
+    var nom = m[1].toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(CHARSETS_SUPPORTES, nom)) {
+      return CHARSETS_SUPPORTES[nom];
+    }
+  }
+  return 'UTF-8';
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
