@@ -40,6 +40,13 @@ var NOM_DOSSIER_DRAFTS = '_drafts';
 /** Nom d'affichage de l'expéditeur des emails (M6). */
 var NOM_EXPEDITEUR = 'BIOXA Veille';
 
+/**
+ * Nom d'organisation (marque plateforme) affiché dans l'en-tête et le pied de
+ * chaque newsletter. Partagé par les 6 newsletters. Marque d'affichage — ni
+ * secret ni URL/email — d'où sa place en constante (pas de clé Sheet).
+ */
+var NOM_ORGANISATION = 'Laboratoire BIOXA';
+
 /** Quota Gmail journalier par défaut si absent de _config (compte gratuit). */
 var GMAIL_QUOTA_DEFAUT = 100;
 

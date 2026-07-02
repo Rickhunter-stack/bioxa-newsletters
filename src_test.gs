@@ -331,8 +331,12 @@ function testerGenererHtml() {
     html.indexOf('Cyber') < html.indexOf('Economie'), 'ordre rubriques = ordre sources');
   // 5. Pied contient la promptVersion
   check(html.indexOf('v2026-06-27') !== -1, 'promptVersion dans le pied');
-  // 6. Présence de la media query responsive
-  check(html.indexOf('@media only screen and (max-width:600px)') !== -1, 'media query responsive');
+  // 6. Responsive : conteneur élargi 680px + media queries (680 conteneur, 600 colonnes)
+  check(html.indexOf('max-width:680px') !== -1, 'conteneur élargi à 680px (desktop)');
+  check(html.indexOf('@media only screen and (max-width:680px)') !== -1, 'media query conteneur 680');
+  check(html.indexOf('@media only screen and (max-width:600px)') !== -1, 'media query colonnes 600 (mobile)');
+  // 7. Marque plateforme présente (en-tête + pied)
+  check(html.indexOf('Laboratoire BIOXA') !== -1, 'marque organisation présente');
 
   // Cas 0 item : ne lève pas, retourne string vide.
   var vide = genererHTML(config, []);
@@ -446,8 +450,10 @@ function testerEstFrancais() {
 }
 
 /**
- * Test OFFLINE du rendu de la traduction FR additive : affichée pour un titre
- * anglophone, MASQUÉE pour un titre déjà français, titre original toujours verbatim.
+ * Test OFFLINE du titre affiché : pour un titre anglophone, le titre affiché
+ * (texte du lien) est la TRADUCTION FR et le titre original est conservé en
+ * info-bulle (title=) ; pour un titre déjà français, le titre original est
+ * affiché et la traduction (erronée) de Claude est ignorée.
  * @return {void}
  */
 function testerTraductionTitre() {
@@ -467,12 +473,14 @@ function testerTraductionTitre() {
   ];
   var html = genererHTML(config, items);
 
-  // Item EN : titre original présent (verbatim, échappé) + traduction affichée.
-  check(html.indexOf('Critical AT&amp;T breach') !== -1, 'titre EN original verbatim (échappé)');
-  check(html.indexOf('Faille critique chez AT&amp;T') !== -1, 'traduction FR affichée pour titre EN');
-  // Item FR : titre original présent, traduction (erronée de Claude) MASQUÉE.
-  check(html.indexOf('Faille critique détectée') !== -1, 'titre FR original présent');
-  check(html.indexOf('Critical breach detected') === -1, 'traduction masquée pour titre déjà FR');
+  // Item EN : titre AFFICHÉ (texte du lien) = traduction FR ; original en info-bulle.
+  check(html.indexOf('>Faille critique chez AT&amp;T</a>') !== -1,
+    'titre affiché = traduction FR (texte du lien) pour titre EN');
+  check(html.indexOf('title="Critical AT&amp;T breach"') !== -1,
+    'titre original EN conservé en info-bulle (traçabilité)');
+  // Item FR : titre original affiché ; traduction erronée de Claude ignorée (pas d'info-bulle).
+  check(html.indexOf('>Faille critique détectée</a>') !== -1, 'titre FR original affiché');
+  check(html.indexOf('Critical breach detected') === -1, 'traduction ignorée pour titre déjà FR');
 
   Logger.log('--- testerTraductionTitre : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
 }
