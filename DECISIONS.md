@@ -657,6 +657,26 @@ accents (« é » → « � » / `ï¿œ`).
   quand même. Si le corps décodé contient des caractères de remplacement **U+FFFD** (`_aMojibake_`),
   on **re-décode en Windows-1252** (mappe tous les octets sans perte). Répare quel que soit ce que
   le flux déclare. Ne se déclenche pas pour un flux UTF-8 valide (aucun U+FFFD).
+
+---
+
+## Refonte du template newsletter (design)
+
+Demande du propriétaire : rendu « plus raccord avec une newsletter ». Refonte de `src_render.gs`,
+validée sur maquette. Défauts retenus (recommandés) :
+- **Masthead** : marque en eyebrow + gros titre + **filet d'accent** + sous-titre/date.
+- **Bloc « Au sommaire »** cliquable (ancres `#bx-r{idx}`), rendu si **≥ 2 rubriques**.
+- **Couleur par rubrique** : `PALETTE_RUBRIQUES` (6 couleurs, cyclique par ordre d'apparition) —
+  en-tête de rubrique (barre + titre) et filet latéral des cartes. Le masthead garde `config.couleur`.
+- **Items en cartes** (bordure + filet latéral coloré + coins arrondis), méta `source · date` sur
+  une ligne, titre en lien vers la source (info-bulle = titre original).
+- **Pied foncé** avec bloc de marque.
+- Fond `#eef1f4`, conteneur 680px + ombre légère, **1 media query** (pleine largeur ≤ 680px).
+
+**Contraintes assumées** (écartées) : **pas de photo par article** (flux RSS non fiables en images,
+images externes souvent bloquées en email) ni **mise en page magazine multi-colonnes** (casse
+Outlook/mobile). Les ancres du sommaire peuvent ne pas « sauter » dans certains clients (Gmail) —
+dégradation propre en simple liste. `testerGenererHtml` mis à jour (sommaire, palette, 680px).
 - Branché aux **2** points de lecture : lot `fetchAll` + repli séquentiel.
 - **Pas de rétro-correction** de `_historique` : le fix agit à la source, l'aval est corrigé aux
   prochains runs.

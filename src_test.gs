@@ -331,12 +331,15 @@ function testerGenererHtml() {
     html.indexOf('Cyber') < html.indexOf('Economie'), 'ordre rubriques = ordre sources');
   // 5. Pied contient la promptVersion
   check(html.indexOf('v2026-06-27') !== -1, 'promptVersion dans le pied');
-  // 6. Responsive : conteneur élargi 680px + media queries (680 conteneur, 600 colonnes)
+  // 6. Responsive : conteneur élargi 680px + media query conteneur
   check(html.indexOf('max-width:680px') !== -1, 'conteneur élargi à 680px (desktop)');
   check(html.indexOf('@media only screen and (max-width:680px)') !== -1, 'media query conteneur 680');
-  check(html.indexOf('@media only screen and (max-width:600px)') !== -1, 'media query colonnes 600 (mobile)');
   // 7. Marque plateforme présente (en-tête + pied)
   check(html.indexOf('Laboratoire BIOXA') !== -1, 'marque organisation présente');
+  // 8. Bloc « Au sommaire » présent (≥ 2 rubriques dans la fixture)
+  check(html.indexOf('Au sommaire') !== -1, 'bloc sommaire présent (2 rubriques)');
+  // 9. Couleur de rubrique = palette (rouge pour la 2e rubrique)
+  check(html.indexOf('#c0392b') !== -1, 'couleur palette 2e rubrique');
 
   // Cas 0 item : ne lève pas, retourne string vide.
   var vide = genererHTML(config, []);
