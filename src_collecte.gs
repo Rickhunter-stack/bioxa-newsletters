@@ -301,14 +301,17 @@ var CHARSETS_SUPPORTES = { 'utf-8': 'UTF-8', 'iso-8859-1': 'ISO-8859-1', 'window
  * accents (« é » → « ï¿œ »). On détecte donc le charset (en-tête HTTP puis
  * déclaration XML), et on re-décode en conséquence.
  *
- * Auto-réparation : certains flux DÉCLARENT UTF-8 mais SERVENT du Latin-1/1252
- * (misconfiguration serveur, parfois par intermittence dans un même document). On
- * décode selon le charset déclaré, puis on compare un SCORE de mojibake entre ce
- * décodage et un décodage Windows-1252, et on garde le moins mauvais. Le score
- * compte les DEUX modes d'échec : U+FFFD (Latin-1 lu en UTF-8) ET la signature
- * « Ã/Â + octet haut » (UTF-8 lu en 1252) — ce qui évite le faux positif qui
- * transformait « é » (C3 A9) en « Ã© ». Un décodage UTF-8 propre (score 0) n'est
- * jamais retouché. Jamais d'exception : tout échec retombe sur UTF-8.
+ * Trois modes d'échec d'encodage sont rencontrés sur les flux FR ; on essaie donc
+ * TROIS décodages et on garde celui dont le SCORE de mojibake est le plus bas :
+ *  1. le charset déclaré (généralement UTF-8) ;
+ *  2. Windows-1252 — pour un flux Latin-1/1252 servi (à tort) comme UTF-8
+ *     (accents en octet unique → U+FFFD en UTF-8) ;
+ *  3. UN-DOUBLE-ENCODAGE (`_demojibake_`) — pour un flux DÉJÀ mojibaké à la source
+ *     (les octets encodent littéralement « Ã© » ; ni UTF-8 ni 1252 ne réparent :
+ *     il faut réinterpréter la chaîne en octets Latin-1 puis re-décoder UTF-8).
+ * Le score compte les deux signatures : U+FFFD ET « Ã/Â + octet haut » (cf.
+ * `_scoreMojibake_`). Un décodage UTF-8 propre (score 0) est renvoyé immédiatement
+ * (jamais retouché → pas de faux positif). Jamais d'exception : tout échec → UTF-8.
  *
  * @param {GoogleAppsScript.URL_Fetch.HTTPResponse} response
  * @return {string} Corps décodé.
@@ -332,15 +335,22 @@ function _lireCorpsReponse_(response) {
     }
     var charset = _detecterCharset_(contentType, prolog);
     var corps = response.getContentText(charset);
-    // Charset explicitement 1252, ou décodage propre → rien à faire (pas de 2e appel).
-    if (charset.toLowerCase() === 'windows-1252' || _scoreMojibake_(corps) === 0) {
+    // Décodage propre → rien à faire (pas d'appels supplémentaires).
+    if (_scoreMojibake_(corps) === 0) {
       return corps;
     }
-    var win = response.getContentText('windows-1252');
-    var choisi = _choisirDecodage_(corps, win);
+    var candidats = [corps];
+    var demoji = _demojibake_(corps); // un-double-encodage (flux mojibaké à la source)
+    if (demoji !== null) {
+      candidats.push(demoji);
+    }
+    if (charset.toLowerCase() !== 'windows-1252') {
+      candidats.push(response.getContentText('windows-1252'));
+    }
+    var choisi = _choisirMeilleurDecodage_(candidats);
     if (choisi !== corps) {
-      Logger.log('[collecte] Re-décodage Windows-1252 (score mojibake %s → %s).',
-        _scoreMojibake_(corps), _scoreMojibake_(win));
+      Logger.log('[collecte] Décodage corrigé (score mojibake %s → %s).',
+        _scoreMojibake_(corps), _scoreMojibake_(choisi));
     }
     return choisi;
   } catch (e) {
@@ -398,20 +408,47 @@ function _scoreMojibake_(texte) {
 }
 
 /**
- * Choisit, entre le décodage UTF-8 et le décodage Windows-1252, celui qui a le
- * moins de mojibake. UTF-8 propre (score 0) est renvoyé tel quel ; sinon on ne
- * bascule sur 1252 que s'il est STRICTEMENT meilleur (égalité → UTF-8 déclaré).
- * PUR, testable offline.
- * @param {string} utf8 Décodage selon le charset déclaré (généralement UTF-8).
- * @param {string} win Décodage Windows-1252.
+ * Choisit, parmi plusieurs décodages candidats, celui au score de mojibake le plus
+ * bas. Le PREMIER candidat (décodage déclaré) l'emporte en cas d'égalité (on ne
+ * s'écarte du charset déclaré que si un autre est STRICTEMENT meilleur). PUR.
+ * @param {Array.<string>} candidats Décodages non vides (le 1er = charset déclaré).
  * @return {string}
  * @private
  */
-function _choisirDecodage_(utf8, win) {
-  if (_scoreMojibake_(utf8) === 0) {
-    return utf8;
+function _choisirMeilleurDecodage_(candidats) {
+  var meilleur = candidats[0];
+  var meilleurScore = _scoreMojibake_(candidats[0]);
+  for (var i = 1; i < candidats.length; i++) {
+    var sc = _scoreMojibake_(candidats[i]);
+    if (sc < meilleurScore) {
+      meilleur = candidats[i];
+      meilleurScore = sc;
+    }
   }
-  return _scoreMojibake_(win) < _scoreMojibake_(utf8) ? win : utf8;
+  return meilleur;
+}
+
+/**
+ * Inverse un DOUBLE-ENCODAGE UTF-8 (« Ã© » → « é ») : réinterprète la chaîne en
+ * octets Latin-1 (1 char ≤ 0xFF → 1 octet) puis re-décode ces octets en UTF-8.
+ * Retourne null si la chaîne contient un caractère hors Latin-1 (transformation
+ * inapplicable) ou en cas d'échec. PUR au sens métier (I/O interne Utilities).
+ * @param {string} texte Décodage UTF-8 potentiellement double-encodé.
+ * @return {?string}
+ * @private
+ */
+function _demojibake_(texte) {
+  try {
+    for (var i = 0; i < texte.length; i++) {
+      if (texte.charCodeAt(i) > 0xFF) {
+        return null; // caractère hors Latin-1 → un-double-encodage non applicable
+      }
+    }
+    var octets = Utilities.newBlob('').setDataFromString(texte, 'ISO-8859-1').getBytes();
+    return Utilities.newBlob(octets).getDataAsString('UTF-8');
+  } catch (e) {
+    return null;
+  }
 }
 
 /* ──────────────────────────────────────────────────────────────────────────

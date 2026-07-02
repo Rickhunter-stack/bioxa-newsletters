@@ -659,11 +659,18 @@ accents (« é » → « � » / `ï¿œ`).
 
 ### Correctif v2 — critère de score (remplace `_aMojibake_`)
 `_scoreMojibake_(texte)` compte les **deux** modes d'échec : U+FFFD (Latin-1 lu en UTF-8) **et** la
-signature « Ã/Â (0xC2/0xC3) + caractère ≥ 0x80 » (UTF-8 lu en 1252). `_choisirDecodage_(utf8, win)` :
-UTF-8 propre (score 0) renvoyé tel quel ; sinon on ne bascule sur 1252 que s'il est **strictement**
-meilleur (égalité → UTF-8). Vérifié au niveau octets : UTF-8 pur → conservé ; Latin-1 pur → 1252 ;
-mixte → UTF-8 conservé (1 char perdu au lieu de tout corrompre). La signature Ã/Â+haut est quasi
-inexistante en français/anglais légitime → aucun faux positif sur du texte propre.
+signature « Ã/Â (0xC2/0xC3) + caractère ≥ 0x80 » (UTF-8 lu en 1252).
+
+### Correctif v3 — 3e mode : double-encodage à la source (`_demojibake_`)
+Observé sur Le Monde Informatique : certains flux sont **mojibakés à la source** — leurs octets
+encodent littéralement « Ã© ». Ni UTF-8 ni Windows-1252 ne réparent (décoder les octets en UTF-8
+donne fidèlement « dÃ©veloppeurs »). Il faut **inverser le double-encodage** : réinterpréter la
+chaîne en octets Latin-1 (1 char ≤ 0xFF → 1 octet) puis re-décoder en UTF-8 (`_demojibake_`).
+`_lireCorpsReponse_` essaie donc **3 candidats** — {charset déclaré, Windows-1252, un-double-encodage}
+— et garde le **score minimal** (1er = déclaré en cas d'égalité). UTF-8 propre (score 0) court-circuite.
+Vérifié au niveau octets sur les chaînes exactes de prod :
+`dÃ©veloppeurs bientÃ´t` → `développeurs bientôt` ; `Â« spÃ©cifications accÃ©lÃ¨re Â»` → `« spécifications accélère »`.
+`_demojibake_` renvoie `null` si un caractère est hors Latin-1 (transformation inapplicable).
 
 ---
 
