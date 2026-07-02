@@ -115,56 +115,56 @@ function testerCollecteEtDedup() {
 }
 
 /**
- * Test OFFLINE (sans réseau, sans clé API) du parsing JSONL + ré-appariement
- * par custom_id + extraction de la sortie structurée. Reproduit le pattern de
- * testerCanonicaliserUrl : fixtures de réponses Claude en dur.
+ * Test OFFLINE (sans réseau, sans clé API) du traitement des réponses Claude
+ * synchrones : extraction de la sortie structurée (`_extraireSortie_`), agrégat
+ * d'usage sur une map de résultats (comme la produit `appelerClaudeMessages`),
+ * bornage/troncature, et dérivation du endpoint Messages (`_endpointMessages_`).
  * @return {void}
  */
 function testerParseSortieClaude() {
   var echecs = 0;
+  function check(cond, libelle) {
+    if (!cond) { echecs++; Logger.log('FAIL: %s', libelle); }
+  }
 
-  // Fixture JSONL : 2 succès (ordre inversé volontairement) + 1 en erreur.
-  var jsonl = [
-    JSON.stringify({ custom_id: 'hashB', result: { type: 'succeeded', message: {
-      content: [{ type: 'text', text: '{"score": 7, "resume_fr": "Résumé B.", "raison": "Pertinent."}' }],
-      usage: { input_tokens: 12, output_tokens: 8 }
-    } } }),
-    JSON.stringify({ custom_id: 'hashA', result: { type: 'succeeded', message: {
+  // Map de résultats telle que la construit appelerClaudeMessages (par custom_id) :
+  // 2 succès (pré-filtre + scoring) + 1 en échec.
+  var map = {
+    hashA: { ok: true, erreur: null, message: {
       content: [{ type: 'text', text: '{"decision": "oui"}' }],
       usage: { input_tokens: 5, output_tokens: 2 }
-    } } }),
-    JSON.stringify({ custom_id: 'hashC', result: { type: 'errored', error: { type: 'invalid_request' } } })
-  ].join('\n') + '\n';
-
-  var lignes = _parserResultatsJsonl_(jsonl);
-  if (lignes.length !== 3) { echecs++; Logger.log('FAIL: %s lignes parsées (attendu 3)', lignes.length); }
-
-  var map = _indexerResultats_(lignes);
-  // Ré-appariement par custom_id (indépendant de l'ordre).
-  if (!(map.hashA && map.hashA.ok)) { echecs++; Logger.log('FAIL: hashA absent/échec'); }
-  if (!(map.hashB && map.hashB.ok)) { echecs++; Logger.log('FAIL: hashB absent/échec'); }
-  if (!(map.hashC && map.hashC.ok === false)) { echecs++; Logger.log('FAIL: hashC devrait être en erreur'); }
+    } },
+    hashB: { ok: true, erreur: null, message: {
+      content: [{ type: 'text', text: '{"score": 7, "resume_fr": "Résumé B.", "titre_traduction": null, "raison": "Pertinent."}' }],
+      usage: { input_tokens: 12, output_tokens: 8 }
+    } },
+    hashC: { ok: false, message: null, erreur: 'HTTP 400 : invalid_request' }
+  };
 
   // Extraction des sorties structurées.
   var sortieA = _extraireSortie_(map.hashA.message);
-  if (!sortieA || sortieA.decision !== 'oui') { echecs++; Logger.log('FAIL: décision hashA = %s', sortieA && sortieA.decision); }
-
+  check(sortieA && sortieA.decision === 'oui', 'décision hashA = oui');
   var sortieB = _extraireSortie_(map.hashB.message);
-  if (!sortieB || sortieB.score !== 7) { echecs++; Logger.log('FAIL: score hashB = %s', sortieB && sortieB.score); }
+  check(sortieB && sortieB.score === 7, 'score hashB = 7');
+  // Résultat en échec : pas de message à extraire.
+  check(map.hashC.ok === false && map.hashC.message === null, 'hashC en échec (message null)');
 
   // Bornage + troncature.
-  if (_bornerScore_(99) !== 10 || _bornerScore_(-3) !== 0 || _bornerScore_('abc') !== 0) {
-    echecs++; Logger.log('FAIL: bornage score incorrect');
-  }
+  check(_bornerScore_(99) === 10 && _bornerScore_(-3) === 0 && _bornerScore_('abc') === 0,
+    'bornage score [0,10]');
   var longResume = new Array(260).join('x'); // 259 caractères
   var tronque = _tronquerResume_(longResume, 'titre test');
-  if (tronque.length !== RESUME_MAX_CHARS + 1) { echecs++; Logger.log('FAIL: troncature = %s car', tronque.length); }
+  check(tronque.length === RESUME_MAX_CHARS + 1, 'troncature résumé à 200 + …');
 
-  // Usage agrégé.
+  // Usage agrégé (seuls les succès comptent) : 5+12 in, 2+8 out.
   var usage = _sommerUsage_(map);
-  if (usage.inputTokens !== 17 || usage.outputTokens !== 10) {
-    echecs++; Logger.log('FAIL: usage in=%s out=%s (attendu 17/10)', usage.inputTokens, usage.outputTokens);
-  }
+  check(usage.inputTokens === 17 && usage.outputTokens === 10, 'usage in=17 out=10 (échecs exclus)');
+
+  // Dérivation du endpoint Messages (strip /batches, sinon inchangé).
+  check(_endpointMessages_('https://api.anthropic.com/v1/messages/batches') === 'https://api.anthropic.com/v1/messages',
+    'endpoint : /batches retiré');
+  check(_endpointMessages_('https://api.anthropic.com/v1/messages') === 'https://api.anthropic.com/v1/messages',
+    'endpoint : /v1/messages inchangé');
 
   Logger.log('--- testerParseSortieClaude : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
 }

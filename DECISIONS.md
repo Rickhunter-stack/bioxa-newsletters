@@ -659,3 +659,41 @@ accents (« é » → « � » / `ï¿œ`).
 ### Test offline
 `testerDetecterCharset` (OK) : header charset ; prolog XML en repli ; header+prolog absents → UTF-8 ;
 charset exotique → UTF-8 ; priorité header > prolog.
+
+---
+
+## Abandon de la Batches API → Messages API synchrone (Option B)
+
+### Problème
+Le poll synchrone borné à 4 min (`BATCH_POLL_BUDGET_MS`) échouait **par intermittence** même à
+volume plafonné (66 requêtes non terminées en 4 min alors que 67 passaient en 2 min la veille) :
+la **latence de la Batches API n'est pas bornée**, et le **plafond d'exécution Apps Script (6 min)**
+interdit d'attendre plus longtemps (collecte + pré-filtre 4 min + scoring dépasse déjà 6 min).
+Le plafond par rubrique (25/rubrique) réduisait le volume mais pas la latence, non liée au nombre
+de requêtes mais au pipeline asynchrone d'Anthropic.
+
+### Décision (validée par le propriétaire) — Option B
+Bascule vers la **Messages API synchrone `/v1/messages`**, **1 appel par item** (custom_id = urlHash),
+via le nouveau choke-point **`appelerClaudeMessages`**. Les réponses reviennent en secondes → le run
+tient largement dans les 6 min (~2-2,5 min observés). `CLAUDE.md` mis à jour (convention endpoint +
+nom du choke-point). L'**Option A** (architecture asynchrone `verifierBatchsPendants`) reste
+l'échappatoire documentée si le volume explose (> ~300 items).
+
+### Détails
+- Construction des requêtes **inchangée** (`prefilterTitres`/`scorerEtResumer`) : mêmes `params`
+  (`system`, `messages`, `output_config.format`, `max_tokens`) ; seul le choke-point change.
+- **Endpoint** dérivé de `_config` (`_endpointMessages_` retire un `/batches` final → compat Sheets
+  existantes) ; défaut d'init passé à `/v1/messages`.
+- **Garde-fou temps** `MESSAGES_TIME_BUDGET_MS` (4,5 min) : au-delà, on cesse d'émettre de nouveaux
+  appels (items restants : conservés au pré-filtre par prudence, écartés au scoring) → dégradation
+  propre au lieu du kill 6 min.
+- **Résilience par item** : `try/catch` par appel (un échec n'arrête pas les autres), retries
+  429/5xx via `_appelerAvecRetry_` réutilisé.
+- **Coût** : plus de remise batch −50 % → plein tarif (`_calculerCout_` sans facteur). Impact réel
+  ~×2, soit ~0,05-0,07 $/run — négligeable.
+- **Code batch retiré** (mort) : `appelerClaudeBatch`, `_attendreFinBatch_`, `_recupererResultats_`,
+  `_parserResultatsJsonl_`, `_indexerResultats_`, `BATCH_POLL_BUDGET_MS`, `REMISE_BATCH`.
+
+### Test offline
+`testerParseSortieClaude` réécrit (OK) : extraction sortie structurée, agrégat d'usage (échecs
+exclus), bornage/troncature, `_endpointMessages_` (strip `/batches`).

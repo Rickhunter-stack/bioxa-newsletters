@@ -1,15 +1,19 @@
 /**
- * src_claude.gs — Appels Claude via la Message Batches API (PRD M3 + M4).
+ * src_claude.gs — Appels Claude via la Messages API synchrone (PRD M3 + M4).
  *
- * RÈGLE CLAUDE.md : tout appel à l'API Claude passe par appelerClaudeBatch().
+ * RÈGLE CLAUDE.md : tout appel à l'API Claude passe par appelerClaudeMessages().
  * Pipeline : prefilterTitres (M3, titre seul) PUIS scorerEtResumer (M4) — le
  * pré-filtre précède TOUJOURS le scoring (non négociable).
  *
- * Architecture (cf. DECISIONS.md, incr. 3) :
- * - Option A : poll synchrone borné (budget 4 min) dans un seul run.
- * - Option 2 : un batch de N requêtes (1 par item), custom_id = urlHash.
- * - Structured outputs (output_config.format) activés — supportés en Batches —
- *   + parse défensif de repli (une garantie API n'est jamais 100 %).
+ * Architecture (cf. DECISIONS.md) :
+ * - Appels SYNCHRONES à /v1/messages, 1 requête par item (custom_id = urlHash).
+ *   Retenu après l'échec récurrent du poll batch borné : la latence de la Batches
+ *   API n'est pas bornée alors qu'Apps Script tue un run à 6 min.
+ * - Garde-fou temps (MESSAGES_TIME_BUDGET_MS) : au-delà du budget, on cesse
+ *   d'émettre de nouveaux appels (items restants : conservés au pré-filtre par
+ *   prudence, écartés au scoring) — dégradation propre plutôt que kill à 6 min.
+ * - Structured outputs (output_config.format) + parse défensif de repli (une
+ *   garantie API n'est jamais 100 %).
  *
  * Anti-fuite : seuls titre + résumé brut (publics) sont envoyés. Le titre n'est
  * jamais reformulé. Le résumé final est tronqué à 200 caractères.
@@ -26,11 +30,11 @@ var CLAUDE_MAX_RETRIES = 2;
 /** Backoff exponentiel de base (2 s, 4 s). */
 var CLAUDE_BACKOFF_BASE_MS = 2000;
 
-/** Budget total d'attente de fin de batch (Option A). */
-var BATCH_POLL_BUDGET_MS = 4 * 60 * 1000;
-
-/** Remise Batch API (−50 %) pour l'estimation de coût. */
-var REMISE_BATCH = 0.5;
+/**
+ * Budget temps de la boucle d'appels synchrones. Au-delà, on cesse d'émettre de
+ * nouveaux appels (dégradation propre avant le kill à 6 min d'Apps Script).
+ */
+var MESSAGES_TIME_BUDGET_MS = 4.5 * 60 * 1000;
 
 /** Longueur max du résumé final (PRD M4). */
 var RESUME_MAX_CHARS = 200;
@@ -96,7 +100,7 @@ var SUFFIXE_PROMPT_TRADUCTION =
  * @param {Array.<Object>} items Items dédupliqués (urlHash renseigné).
  * @param {Object} config Config (lireConfig) — global.claudeModel, etc.
  * @return {{items: Array.<Object>, usage: {inputTokens: number, outputTokens: number}}}
- *   Items conservés + usage tokens du batch (pour l'estimation de coût, incr. 5).
+ *   Items conservés + usage tokens des appels (pour l'estimation de coût, incr. 5).
  */
 function prefilterTitres(items, config) {
   if (!items || !items.length) {
@@ -120,7 +124,7 @@ function prefilterTitres(items, config) {
     });
   });
 
-  var sortie = appelerClaudeBatch(requetes, config, 'prefilter');
+  var sortie = appelerClaudeMessages(requetes, config, 'prefilter');
   var resultats = sortie.resultats;
 
   var conserves = [];
@@ -158,7 +162,7 @@ function prefilterTitres(items, config) {
  * @param {Array.<Object>} items Items ayant passé le pré-filtre.
  * @param {Object} config Config (lireConfig) — promptSysteme requis.
  * @return {{items: Array.<Object>, usage: {inputTokens: number, outputTokens: number}}}
- *   Items enrichis (score, resumeFr, raison) top N/rubrique + usage tokens du batch.
+ *   Items enrichis (score, resumeFr, raison) top N/rubrique + usage tokens des appels.
  * @throws {Error} Si config.promptSysteme est absent (scoring impossible).
  */
 function scorerEtResumer(items, config) {
@@ -190,7 +194,7 @@ function scorerEtResumer(items, config) {
     });
   });
 
-  var sortie = appelerClaudeBatch(requetes, config, 'scoring');
+  var sortie = appelerClaudeMessages(requetes, config, 'scoring');
   var resultats = sortie.resultats;
 
   var scores = [];
@@ -220,78 +224,90 @@ function scorerEtResumer(items, config) {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Choke-point unique : création + poll + récupération du batch.
+ * Choke-point unique : appels synchrones Messages API (/v1/messages).
  * ────────────────────────────────────────────────────────────────────────── */
 
 /**
- * Exécute un batch Claude : crée le batch, attend sa fin (poll borné), récupère
- * et ré-apparie les résultats par custom_id, logge le coût estimé.
- * Le modèle est injecté depuis config.global.claudeModel dans chaque requête.
+ * Exécute les requêtes Claude en SYNCHRONE (1 POST /v1/messages par requête),
+ * ré-apparie par custom_id, logge le coût estimé. Le modèle est injecté depuis
+ * config.global.claudeModel. Un échec d'item est isolé (try/catch) : il n'arrête
+ * pas les autres. Au-delà de MESSAGES_TIME_BUDGET_MS, les requêtes restantes ne
+ * sont pas émises (absentes du résultat → traitées comme échec en aval : item
+ * conservé au pré-filtre, écarté au scoring).
  *
  * @param {Array.<{custom_id: string, params: Object}>} requetes
  * @param {Object} config Config (lireConfig).
  * @param {string} etiquette Libellé pour les logs (ex. "prefilter", "scoring").
  * @return {{resultats: !Object.<string, Object>, usage: {inputTokens: number, outputTokens: number}, nbItems: number}}
- * @throws {Error} Si la clé API est absente, l'appel échoue après retries, ou le
- *   batch ne se termine pas dans le budget.
+ * @throws {Error} Si la clé API est absente.
  */
-function appelerClaudeBatch(requetes, config, etiquette) {
+function appelerClaudeMessages(requetes, config, etiquette) {
   if (!requetes || !requetes.length) {
     return { resultats: {}, usage: { inputTokens: 0, outputTokens: 0 }, nbItems: 0 };
   }
 
   var cle = PropertiesService.getScriptProperties().getProperty(PROP_CLE_API_ANTHROPIC);
   if (!_texte_(cle)) {
-    throw new Error('appelerClaudeBatch : clé API absente (Script Property "' + PROP_CLE_API_ANTHROPIC + '").');
+    throw new Error('appelerClaudeMessages : clé API absente (Script Property "' + PROP_CLE_API_ANTHROPIC + '").');
   }
   var modele = config.global.claudeModel;
-  var endpoint = config.global.claudeApiEndpoint;
-
-  // Injection du modèle dans chaque requête.
-  var requetesCompletes = requetes.map(function(req) {
-    var params = {};
-    for (var k in req.params) {
-      if (Object.prototype.hasOwnProperty.call(req.params, k)) {
-        params[k] = req.params[k];
-      }
-    }
-    params.model = modele;
-    return { custom_id: req.custom_id, params: params };
-  });
-
+  var endpoint = _endpointMessages_(config.global.claudeApiEndpoint);
   var enTetes = {
     'x-api-key': cle,
     'anthropic-version': ANTHROPIC_VERSION,
     'content-type': 'application/json'
   };
 
-  // 1. Création du batch.
-  var batch = _appelerAvecRetry_(endpoint, {
-    method: 'post',
-    headers: enTetes,
-    contentType: 'application/json',
-    payload: JSON.stringify({ requests: requetesCompletes }),
-    muteHttpExceptions: true
-  }, etiquette + ':create');
-  Logger.log('[claude] Batch "%s" créé (id=%s, %s requêtes).', etiquette, batch.id, requetesCompletes.length);
-
-  // 2. Attente de fin (poll borné).
+  var resultats = {};
   var debut = (new Date()).getTime();
-  var termine = _attendreFinBatch_(batch.id, endpoint, enTetes, debut + BATCH_POLL_BUDGET_MS, etiquette);
+  var sautes = 0;
+  for (var i = 0; i < requetes.length; i++) {
+    if ((new Date()).getTime() - debut > MESSAGES_TIME_BUDGET_MS) {
+      sautes = requetes.length - i;
+      Logger.log('[claude][WARN] %s : budget temps (%s min) atteint — %s requête(s) non émise(s).',
+        etiquette, MESSAGES_TIME_BUDGET_MS / 60000, sautes);
+      break;
+    }
+    var req = requetes[i];
+    var payload = {};
+    for (var k in req.params) {
+      if (Object.prototype.hasOwnProperty.call(req.params, k)) { payload[k] = req.params[k]; }
+    }
+    payload.model = modele;
+    try {
+      var message = _appelerAvecRetry_(endpoint, {
+        method: 'post',
+        headers: enTetes,
+        contentType: 'application/json',
+        payload: JSON.stringify(payload),
+        muteHttpExceptions: true
+      }, etiquette + ':' + req.custom_id);
+      resultats[req.custom_id] = { ok: true, message: message, erreur: null };
+    } catch (e) {
+      resultats[req.custom_id] = { ok: false, message: null, erreur: e.message };
+      Logger.log('[claude][WARN] %s : appel en échec pour %s : %s', etiquette, req.custom_id, e.message);
+    }
+  }
 
-  // 3. Récupération + ré-appariement.
-  var lignes = _recupererResultats_(termine.results_url, enTetes, etiquette);
-  var resultats = _indexerResultats_(lignes);
-
-  // 4. Coût.
   var usage = _sommerUsage_(resultats);
-  _loggerCout_(etiquette, requetesCompletes.length, usage, config);
+  _loggerCout_(etiquette, requetes.length - sautes, usage, config);
+  return { resultats: resultats, usage: usage, nbItems: requetes.length };
+}
 
-  return { resultats: resultats, usage: usage, nbItems: requetesCompletes.length };
+/**
+ * Dérive le endpoint Messages synchrone à partir du endpoint configuré : retire
+ * un suffixe « /batches » éventuel (compat Sheets encore configurées pour la
+ * Batches API). PUR, testable offline.
+ * @param {string} endpointConfig Valeur de config.global.claudeApiEndpoint.
+ * @return {string}
+ * @private
+ */
+function _endpointMessages_(endpointConfig) {
+  return _texte_(endpointConfig).replace(/\/batches\/?$/, '');
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
- * HTTP + poll (privés).
+ * HTTP (privé).
  * ────────────────────────────────────────────────────────────────────────── */
 
 /**
@@ -339,112 +355,9 @@ function _appelerAvecRetry_(url, options, contexte) {
     ' tentatives — ' + derniereErreur);
 }
 
-/**
- * Poll le statut du batch jusqu'à "ended" ou dépassement du budget.
- * Intervalle : 10 s (< 1 min écoulée), 20 s (< 2 min), 30 s ensuite.
- * @param {string} batchId
- * @param {string} endpointCreate Endpoint de création (base pour le GET).
- * @param {Object} enTetes
- * @param {number} deadline Timestamp (ms) limite.
- * @param {string} etiquette
- * @return {Object} Objet batch terminé (avec results_url).
- * @throws {Error} Si le budget est dépassé avant "ended".
- * @private
- */
-function _attendreFinBatch_(batchId, endpointCreate, enTetes, deadline, etiquette) {
-  var urlStatut = endpointCreate + '/' + batchId;
-  var debut = (new Date()).getTime();
-  while (true) {
-    var batch = _appelerAvecRetry_(urlStatut, {
-      method: 'get', headers: enTetes, muteHttpExceptions: true
-    }, etiquette + ':poll');
-    if (batch.processing_status === 'ended') {
-      return batch;
-    }
-    var maintenant = (new Date()).getTime();
-    if (maintenant >= deadline) {
-      throw new Error('[claude] ' + etiquette + ' : batch ' + batchId +
-        ' non terminé dans le budget (' + (BATCH_POLL_BUDGET_MS / 60000) + ' min) — run annulé.');
-    }
-    var ecoule = maintenant - debut;
-    var intervalle = ecoule < 60000 ? 10000 : (ecoule < 120000 ? 20000 : 30000);
-    Utilities.sleep(intervalle);
-  }
-}
-
-/**
- * Récupère le JSONL des résultats depuis results_url et le parse.
- * @param {string} resultsUrl
- * @param {Object} enTetes
- * @param {string} etiquette
- * @return {Array.<Object>} Lignes de résultats parsées.
- * @throws {Error} Si le téléchargement échoue.
- * @private
- */
-function _recupererResultats_(resultsUrl, enTetes, etiquette) {
-  if (!_texte_(resultsUrl)) {
-    throw new Error('[claude] ' + etiquette + ' : results_url absent sur le batch terminé.');
-  }
-  var reponse;
-  try {
-    reponse = UrlFetchApp.fetch(resultsUrl, { method: 'get', headers: enTetes, muteHttpExceptions: true });
-  } catch (e) {
-    throw new Error('[claude] ' + etiquette + ' : échec téléchargement résultats : ' + e.message);
-  }
-  if (reponse.getResponseCode() < 200 || reponse.getResponseCode() >= 300) {
-    throw new Error('[claude] ' + etiquette + ' : HTTP ' + reponse.getResponseCode() + ' sur results_url.');
-  }
-  return _parserResultatsJsonl_(reponse.getContentText());
-}
-
 /* ──────────────────────────────────────────────────────────────────────────
  * Parsing (purs, testables offline).
  * ────────────────────────────────────────────────────────────────────────── */
-
-/**
- * Parse un texte JSONL en tableau d'objets. Une ligne illisible est loggée et ignorée.
- * @param {string} texte
- * @return {Array.<Object>}
- * @private
- */
-function _parserResultatsJsonl_(texte) {
-  var lignes = _texte_(texte).split('\n');
-  var out = [];
-  for (var i = 0; i < lignes.length; i++) {
-    var ligne = lignes[i].trim();
-    if (ligne === '') { continue; }
-    try {
-      out.push(JSON.parse(ligne));
-    } catch (e) {
-      Logger.log('[claude][WARN] Ligne JSONL illisible ignorée : %s', e.message);
-    }
-  }
-  return out;
-}
-
-/**
- * Indexe les lignes de résultats par custom_id (ordre non garanti, PRD M4).
- * @param {Array.<Object>} lignes
- * @return {!Object.<string, {ok: boolean, message: ?Object, erreur: ?string}>}
- * @private
- */
-function _indexerResultats_(lignes) {
-  var map = {};
-  for (var i = 0; i < lignes.length; i++) {
-    var l = lignes[i];
-    if (!l || !l.custom_id || !l.result) { continue; }
-    if (l.result.type === 'succeeded') {
-      map[l.custom_id] = { ok: true, message: l.result.message, erreur: null };
-    } else {
-      var raison = l.result.type;
-      if (l.result.error && l.result.error.type) {
-        raison += ' : ' + l.result.error.type;
-      }
-      map[l.custom_id] = { ok: false, message: null, erreur: raison };
-    }
-  }
-  return map;
-}
 
 /**
  * Extrait l'objet JSON de sortie d'un message Claude (premier bloc texte),
@@ -550,7 +463,8 @@ function _sommerUsage_(resultats) {
 }
 
 /**
- * Calcule le coût estimé d'un usage tokens (prix _config, remise Batch −50 %).
+ * Calcule le coût estimé d'un usage tokens (prix _config, plein tarif —
+ * appels synchrones Messages API, plus de remise batch).
  * @param {{inputTokens: number, outputTokens: number}} usage
  * @param {Object} config
  * @return {number} Coût estimé (devise des prix _config, défaut USD).
@@ -558,7 +472,7 @@ function _sommerUsage_(resultats) {
 function _calculerCout_(usage, config) {
   var pIn = config.global.prixInputParMillion;
   var pOut = config.global.prixOutputParMillion;
-  return (usage.inputTokens / 1e6 * pIn + usage.outputTokens / 1e6 * pOut) * REMISE_BATCH;
+  return usage.inputTokens / 1e6 * pIn + usage.outputTokens / 1e6 * pOut;
 }
 
 /**
@@ -585,7 +499,7 @@ function _additionnerUsage_(a, b) {
  */
 function _loggerCout_(etiquette, nbItems, usage, config) {
   var cout = _calculerCout_(usage, config);
-  Logger.log('[claude][cout] %s : %s items | tokens in=%s out=%s | coût estimé=%s (prix %s/%s par M, remise batch %s).',
+  Logger.log('[claude][cout] %s : %s items | tokens in=%s out=%s | coût estimé=%s (prix %s/%s par M, plein tarif).',
     etiquette, nbItems, usage.inputTokens, usage.outputTokens, cout.toFixed(4),
-    config.global.prixInputParMillion, config.global.prixOutputParMillion, REMISE_BATCH);
+    config.global.prixInputParMillion, config.global.prixOutputParMillion);
 }

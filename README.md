@@ -22,7 +22,7 @@ Le pipeline (collecte → pré-filtre → scoring → rendu → envoi) arrive au
 | `src_init.gs` | `initialiserSheetDeConfig()` — crée les onglets manquants (idempotent) ; `_ecrireSheet_` = unique point d'écriture |
 | `src_collecte.gs` | `collecterItems(idNewsletter, config)` — collecte RSS/Atom parallèle (PRD M1) |
 | `src_dedup.gs` | `dedoublonner(items, idNewsletter)` — dédup par hash d'URL vs `_historique` (PRD M2) |
-| `src_claude.gs` | `prefilterTitres` + `scorerEtResumer` via `appelerClaudeBatch` — Claude Batch (PRD M3/M4) |
+| `src_claude.gs` | `prefilterTitres` + `scorerEtResumer` via `appelerClaudeMessages` — Messages API synchrone (PRD M3/M4) |
 | `src_render.gs` | `genererHTML(config, items)` — rendu HTML email responsive (PRD M5/M7), pur/offline |
 | `src_envoi.gs` | `livrerNewsletter` / `envoyerGmail` — dry-run Drive (S1) + envoi Gmail réel (M6) |
 | `src_logs.gs` | `ecrireHistorique` (P4) / `logRun` (P5) / `envoyerMailAdmin` (P6) / `envoyerRapportHebdo` (S4) |
@@ -39,7 +39,7 @@ En-têtes ligne 1 : `Clé | Valeur`. Une ligne par paramètre.
 | Clé | Valeur par défaut | Type | Description |
 |---|---|---|---|
 | `claude_model` | `claude-haiku-4-5-20251001` | string | Modèle Claude (configurable, levier S3) |
-| `claude_api_endpoint` | `https://api.anthropic.com/v1/messages/batches` | string | Endpoint Message Batches |
+| `claude_api_endpoint` | `https://api.anthropic.com/v1/messages` | string | Endpoint Messages API (synchrone ; un `/batches` final est retiré automatiquement) |
 | `gmail_quota_jour` | `100` | number | Quota Gmail/jour (compte gratuit) |
 | `admin_email` | *(à remplir)* | string | Destinataire des rapports/alertes |
 | `dry_run_global` | `FALSE` | bool | Bascule globale dry-run |
@@ -123,10 +123,11 @@ sauf si la Sheet ou l'onglet de la newsletter est totalement introuvable.
    sources DSI (réseau requis) ; logge items par rubrique, sources HS et compteurs
    de déduplication.
 8. **`testerParseSortieClaude`** : test **offline** (sans réseau ni clé API) du
-   parsing JSONL + ré-appariement par `custom_id` + extraction des sorties structurées.
+   traitement des réponses (extraction des sorties structurées, agrégat d'usage,
+   bornage/troncature, dérivation du endpoint Messages).
 9. **`testerPrefilter`** / **`testerScoring`** / **`testerClaudeBatchBoutEnBout`** :
-   appels **réels** à Claude Batch (réseau + `ANTHROPIC_API_KEY` requis, consomment
-   des tokens). Poser d'abord la Script Property `ANTHROPIC_API_KEY`.
+   appels **réels** à Claude (Messages API synchrone ; réseau + `ANTHROPIC_API_KEY`
+   requis, consomment des tokens). Poser d'abord la Script Property `ANTHROPIC_API_KEY`.
 10. **`testerLireTableauxColonnes`** / **`testerLocaliserTableauAmbiguite`** : tests
     **offline** de la lecture des tableaux Sources/Destinataires (non-régression du bug
     « dernière source toujours inactive » + garde-fou d'ambiguïté).

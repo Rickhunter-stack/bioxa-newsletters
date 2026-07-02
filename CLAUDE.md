@@ -8,7 +8,7 @@ Première instance livrée : newsletter DSI Cyber+IA. Cinq autres newsletters th
 ## Stack imposée
 - Google Apps Script (JavaScript V8) — pas de Node.js, pas de build step, pas de TypeScript
 - Google Sheets pour la configuration métier (Sheet `BIOXA-Newsletters-Config`)
-- Claude API Anthropic, endpoint Message Batches API (`/v1/messages/batches`)
+- Claude API Anthropic, endpoint Messages API synchrone (`/v1/messages`) — 1 appel par item (la Batches API a été abandonnée : latence non bornée incompatible avec le plafond d'exécution Apps Script 6 min, cf. DECISIONS.md)
 - Modèle par défaut : `claude-haiku-4-5-20251001` (lu depuis l'onglet `_config`)
 - Gmail via `GmailApp` depuis `selasbioxa@gmail.com`
 - Aucune dépendance externe (pas de npm, pas de Firecrawl, pas de bibliothèque tierce)
@@ -30,7 +30,7 @@ Première instance livrée : newsletter DSI Cyber+IA. Cinq autres newsletters th
 - Nommage des fonctions en camelCase français pour le métier (`executerNewsletter`, `collecterItems`, `dedoublonner`, `appelerClaudeBatch`)
 - Préfixe des fichiers source : `src_*.gs` sauf `Code.gs` qui contient les entry points (`executerNewsletterDSI`, etc.)
 - Constantes en SCREAMING_SNAKE_CASE (`CONFIG_IA`, `GMAIL_QUOTA_JOUR`, `CLAUDE_API_ENDPOINT`)
-- Tout appel à l'API Claude passe par `appelerClaudeBatch()` — pas d'appel `UrlFetchApp` direct vers Anthropic ailleurs dans le code
+- Tout appel à l'API Claude passe par `appelerClaudeMessages()` — pas d'appel `UrlFetchApp` direct vers Anthropic ailleurs dans le code
 - Toute lecture de la Sheet passe par `lireConfig(idNewsletter)` — pas de `SpreadsheetApp.getActive()` éparpillé
 - `Logger.log()` pour le debug. La trace finale du run va dans l'onglet `_logs` (1 ligne par exécution)
 - Gestion d'erreur : `try/catch` autour de chaque appel externe (UrlFetchApp, GmailApp.sendEmail), JAMAIS de `catch` muet
@@ -50,7 +50,7 @@ Code.gs                  // entry points par newsletter
 src_config.gs            // lireConfig(idNewsletter)
 src_collecte.gs          // collecterItems(idNewsletter, config)
 src_dedup.gs             // dedoublonner(items)
-src_claude.gs            // prefilterTitres + scorerEtResumer (via appelerClaudeBatch)
+src_claude.gs            // prefilterTitres + scorerEtResumer (via appelerClaudeMessages)
 src_render.gs            // genererHTML(newsletter, items, config)
 src_envoi.gs             // envoyerGmail(newsletter, html, destinataires)
 src_logs.gs              // logRun, envoyerMailAdmin
