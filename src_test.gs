@@ -570,3 +570,37 @@ function testerTriggersDispatch() {
 
   Logger.log('--- testerTriggersDispatch : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
 }
+
+/**
+ * Test OFFLINE de la détection de charset (fix mojibake accents FR). Vérifie la
+ * fonction PURE `_detecterCharset_` : priorité en-tête HTTP > déclaration XML,
+ * liste blanche, repli UTF-8. Aucun accès réseau.
+ * @return {void}
+ */
+function testerDetecterCharset() {
+  var echecs = 0;
+  function check(cond, libelle) {
+    if (!cond) { echecs++; Logger.log('FAIL: %s', libelle); }
+  }
+
+  // 1. charset dans l'en-tête HTTP.
+  check(_detecterCharset_('text/xml; charset=ISO-8859-1', '') === 'ISO-8859-1',
+    'header charset ISO-8859-1');
+  check(_detecterCharset_('application/rss+xml; charset=utf-8', '') === 'UTF-8',
+    'header charset utf-8 → UTF-8 canonique');
+  // 2. header absent → déclaration XML.
+  check(_detecterCharset_('', '<?xml version="1.0" encoding="windows-1252"?>') === 'windows-1252',
+    'prolog XML windows-1252');
+  // 3. header ET prolog absents → UTF-8 par défaut.
+  check(_detecterCharset_('', '') === 'UTF-8', 'ni header ni prolog → UTF-8');
+  check(_detecterCharset_('text/xml', '<?xml version="1.0"?>') === 'UTF-8',
+    'header sans charset + prolog sans encoding → UTF-8');
+  // 4. charset hors liste blanche → repli UTF-8.
+  check(_detecterCharset_('text/xml; charset=Shift_JIS', '') === 'UTF-8',
+    'charset exotique → repli UTF-8');
+  // 5. priorité header > prolog quand les deux diffèrent.
+  check(_detecterCharset_('text/xml; charset=ISO-8859-1', '<?xml encoding="utf-8"?>') === 'ISO-8859-1',
+    'header prioritaire sur le prolog');
+
+  Logger.log('--- testerDetecterCharset : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
+}
