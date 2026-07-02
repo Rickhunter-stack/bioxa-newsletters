@@ -340,6 +340,8 @@ function testerGenererHtml() {
   check(html.indexOf('Au sommaire') !== -1, 'bloc sommaire présent (2 rubriques)');
   // 9. Couleur de rubrique = palette (rouge pour la 2e rubrique)
   check(html.indexOf('#c0392b') !== -1, 'couleur palette 2e rubrique');
+  // 10. Affordance « Lire l'article → » présente (piste 4)
+  check(html.indexOf('Lire l\'article') !== -1, 'lien « Lire l\'article » présent');
 
   // Cas 0 item : ne lève pas, retourne string vide.
   var vide = genererHTML(config, []);
@@ -605,11 +607,19 @@ function testerDetecterCharset() {
   check(_detecterCharset_('text/xml; charset=ISO-8859-1', '<?xml encoding="utf-8"?>') === 'ISO-8859-1',
     'header prioritaire sur le prolog');
 
-  // 6. Détection de mojibake (U+FFFD) — déclenche le re-décodage Windows-1252.
+  // 6. Score de mojibake : compte U+FFFD ET la signature « Ã/Â + octet haut ».
   var fffd = String.fromCharCode(0xFFFD);
-  check(_aMojibake_('Tra' + fffd + 'abilit' + fffd) === true, 'mojibake détecté (U+FFFD présent)');
-  check(_aMojibake_('Traçabilité') === false, 'texte accentué propre → pas de mojibake');
-  check(_aMojibake_('') === false, 'vide → pas de mojibake');
+  check(_scoreMojibake_('développeurs bientôt') === 0, 'UTF-8 propre → score 0');
+  check(_scoreMojibake_('d' + fffd + 'j' + fffd) === 2, 'U+FFFD comptés (Latin-1 lu en UTF-8)');
+  check(_scoreMojibake_('dÃ©veloppeurs bientÃ´t') === 2, 'signature double-décodage comptée (UTF-8 lu en 1252)');
+
+  // 7. Choix du décodage : ne JAMAIS corrompre un UTF-8 déjà correct (faux positif PR #14).
+  check(_choisirDecodage_('développeurs bientôt', 'dÃ©veloppeurs bientÃ´t') === 'développeurs bientôt',
+    'UTF-8 propre conservé (pas de bascule 1252)');
+  check(_choisirDecodage_('d' + fffd + 'j' + fffd, 'déjà') === 'déjà',
+    'Latin-1 pur → bascule 1252 (fix d\'origine préservé)');
+  check(_choisirDecodage_('développeurs ' + fffd + ' bientôt', 'dÃ©veloppeurs é bientÃ´t') === 'développeurs ' + fffd + ' bientôt',
+    'mixte → garder UTF-8 (1 char perdu) plutôt que tout corrompre');
 
   Logger.log('--- testerDetecterCharset : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
 }

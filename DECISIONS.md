@@ -652,11 +652,18 @@ accents (« é » → « � » / `ï¿œ`).
 - **`_lireCorpsReponse_(response)`** (I/O) : lit `Content-Type` (`getAllHeaders`), « sniffe » le
   prolog en **Latin-1** (mapping octet→char 1:1, ne casse jamais), détecte le charset, puis
   `getContentText(charset)`. **Jamais d'exception** : tout échec retombe sur `getContentText()` UTF-8.
-- **Auto-réparation mojibake (ajout post-test)** : certains flux (ex. « Le Monde Informatique »)
-  **déclarent UTF-8 mais servent du Latin-1/Windows-1252** → décoder selon la déclaration échoue
-  quand même. Si le corps décodé contient des caractères de remplacement **U+FFFD** (`_aMojibake_`),
-  on **re-décode en Windows-1252** (mappe tous les octets sans perte). Répare quel que soit ce que
-  le flux déclare. Ne se déclenche pas pour un flux UTF-8 valide (aucun U+FFFD).
+- **Auto-réparation mojibake (v1, corrigée ci-dessous)** : première version basée sur « présence
+  d'U+FFFD → bascule Windows-1252 ». **Faux positif** : sur un flux à encodage MIXTE (majorité UTF-8
+  + un octet Latin-1 égaré), un seul U+FFFD faisait basculer tout le document en 1252, transformant
+  les « é » corrects (C3 A9) en « Ã© ». Remplacée par le critère de score ci-dessous.
+
+### Correctif v2 — critère de score (remplace `_aMojibake_`)
+`_scoreMojibake_(texte)` compte les **deux** modes d'échec : U+FFFD (Latin-1 lu en UTF-8) **et** la
+signature « Ã/Â (0xC2/0xC3) + caractère ≥ 0x80 » (UTF-8 lu en 1252). `_choisirDecodage_(utf8, win)` :
+UTF-8 propre (score 0) renvoyé tel quel ; sinon on ne bascule sur 1252 que s'il est **strictement**
+meilleur (égalité → UTF-8). Vérifié au niveau octets : UTF-8 pur → conservé ; Latin-1 pur → 1252 ;
+mixte → UTF-8 conservé (1 char perdu au lieu de tout corrompre). La signature Ã/Â+haut est quasi
+inexistante en français/anglais légitime → aucun faux positif sur du texte propre.
 
 ---
 
@@ -677,6 +684,16 @@ validée sur maquette. Défauts retenus (recommandés) :
 images externes souvent bloquées en email) ni **mise en page magazine multi-colonnes** (casse
 Outlook/mobile). Les ancres du sommaire peuvent ne pas « sauter » dans certains clients (Gmail) —
 dégradation propre en simple liste. `testerGenererHtml` mis à jour (sommaire, palette, 680px).
+
+### Améliorations visuelles (pistes 1/2/4, email-safe Outlook)
+- **Piste 1** — puces de couleur par rubrique dans le sommaire (● coloré = couleur de texte, fiable
+  partout, pas de background-image).
+- **Piste 2** — hiérarchie typo : en-tête de rubrique en capitales espacées ; méta `source · date`
+  en capitales, plus petite/discrète ; interlignage résumé augmenté.
+- **Piste 4** — affordance « Lire l'article → » (couleur rubrique) sous chaque carte + respiration.
+- **Écartée** : pistes de pastille de sévérité/CVSS (pas de CVSS fiable dans les données ; `item.score`
+  est une pertinence éditoriale, pas une gravité). Non retenu par le propriétaire.
+- *Compat* : `border-radius`/`box-shadow` ignorés par Outlook desktop (rendu carré/plat, sans casse).
 - Branché aux **2** points de lecture : lot `fetchAll` + repli séquentiel.
 - **Pas de rétro-correction** de `_historique` : le fix agit à la source, l'aval est corrigé aux
   prochains runs.
