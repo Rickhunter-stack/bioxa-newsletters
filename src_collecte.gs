@@ -302,9 +302,13 @@ var CHARSETS_SUPPORTES = { 'utf-8': 'UTF-8', 'iso-8859-1': 'ISO-8859-1', 'window
  * déclaration XML), et on re-décode en conséquence.
  *
  * Auto-réparation : certains flux DÉCLARENT UTF-8 mais SERVENT du Latin-1/1252
- * (misconfiguration serveur). Si le décodage produit des caractères de
- * remplacement U+FFFD, on re-décode en Windows-1252 (qui mappe tous les octets
- * sans perte). Jamais d'exception : tout échec retombe sur UTF-8.
+ * (misconfiguration serveur, parfois par intermittence dans un même document). On
+ * décode selon le charset déclaré, puis on compare un SCORE de mojibake entre ce
+ * décodage et un décodage Windows-1252, et on garde le moins mauvais. Le score
+ * compte les DEUX modes d'échec : U+FFFD (Latin-1 lu en UTF-8) ET la signature
+ * « Ã/Â + octet haut » (UTF-8 lu en 1252) — ce qui évite le faux positif qui
+ * transformait « é » (C3 A9) en « Ã© ». Un décodage UTF-8 propre (score 0) n'est
+ * jamais retouché. Jamais d'exception : tout échec retombe sur UTF-8.
  *
  * @param {GoogleAppsScript.URL_Fetch.HTTPResponse} response
  * @return {string} Corps décodé.
@@ -328,15 +332,17 @@ function _lireCorpsReponse_(response) {
     }
     var charset = _detecterCharset_(contentType, prolog);
     var corps = response.getContentText(charset);
-    // Auto-réparation : U+FFFD = charset erroné (flux Latin-1/1252 déclaré UTF-8).
-    if (_aMojibake_(corps) && charset.toLowerCase() !== 'windows-1252') {
-      var repli = response.getContentText('windows-1252');
-      if (!_aMojibake_(repli)) {
-        Logger.log('[collecte] Charset "%s" produit du mojibake — re-décodage Windows-1252.', charset);
-        return repli;
-      }
+    // Charset explicitement 1252, ou décodage propre → rien à faire (pas de 2e appel).
+    if (charset.toLowerCase() === 'windows-1252' || _scoreMojibake_(corps) === 0) {
+      return corps;
     }
-    return corps;
+    var win = response.getContentText('windows-1252');
+    var choisi = _choisirDecodage_(corps, win);
+    if (choisi !== corps) {
+      Logger.log('[collecte] Re-décodage Windows-1252 (score mojibake %s → %s).',
+        _scoreMojibake_(corps), _scoreMojibake_(win));
+    }
+    return choisi;
   } catch (e) {
     Logger.log('[collecte][WARN] Décodage charset impossible, repli UTF-8 : %s', e.message);
     return response.getContentText();
@@ -368,14 +374,44 @@ function _detecterCharset_(contentType, prolog) {
 }
 
 /**
- * Détecte la présence de caractères de remplacement Unicode (U+FFFD), signe d'un
- * décodage effectué avec le mauvais charset. PUR, testable offline.
+ * Score de mojibake d'un texte décodé (plus bas = mieux). PUR, testable offline.
+ * Compte les DEUX modes d'échec de décodage :
+ *  - U+FFFD (0xFFFD) : octets invalides — Latin-1/1252 lu comme UTF-8 ;
+ *  - signature « Ã/Â (0xC2/0xC3) + caractère ≥ 0x80 » : UTF-8 lu comme 1252
+ *    (ex. « é » = C3 A9 → « Ã© »). Quasi inexistante en français/anglais légitime.
  * @param {string} texte
- * @return {boolean}
+ * @return {number}
  * @private
  */
-function _aMojibake_(texte) {
-  return _texte_(texte).indexOf(String.fromCharCode(0xFFFD)) !== -1;
+function _scoreMojibake_(texte) {
+  var s = _texte_(texte);
+  var score = 0;
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i);
+    if (c === 0xFFFD) {
+      score++;
+    } else if ((c === 0xC2 || c === 0xC3) && i + 1 < s.length && s.charCodeAt(i + 1) >= 0x80) {
+      score++;
+    }
+  }
+  return score;
+}
+
+/**
+ * Choisit, entre le décodage UTF-8 et le décodage Windows-1252, celui qui a le
+ * moins de mojibake. UTF-8 propre (score 0) est renvoyé tel quel ; sinon on ne
+ * bascule sur 1252 que s'il est STRICTEMENT meilleur (égalité → UTF-8 déclaré).
+ * PUR, testable offline.
+ * @param {string} utf8 Décodage selon le charset déclaré (généralement UTF-8).
+ * @param {string} win Décodage Windows-1252.
+ * @return {string}
+ * @private
+ */
+function _choisirDecodage_(utf8, win) {
+  if (_scoreMojibake_(utf8) === 0) {
+    return utf8;
+  }
+  return _scoreMojibake_(win) < _scoreMojibake_(utf8) ? win : utf8;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────

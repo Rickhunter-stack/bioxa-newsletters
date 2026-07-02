@@ -114,8 +114,10 @@ function _rendreEntete_(nom, sousTitre, dateEnvoi, couleur) {
  */
 function _rendreSommaire_(groupes) {
   var liens = groupes.map(function(g, idx) {
+    // Piste 1 : puce de couleur par rubrique (● coloré = fiable en email, Outlook OK).
+    var puce = '<span style="color:' + _couleurRubrique_(idx) + ';">●</span> ';
     return '<a href="#bx-r' + idx + '" style="display:inline-block;font-size:13px;color:#1a3e5c;' +
-      'text-decoration:none;margin:0 14px 4px 0;">' + _echapperHtml_(g.rubrique) +
+      'text-decoration:none;margin:0 16px 6px 0;">' + puce + _echapperHtml_(g.rubrique) +
       ' <span style="color:#8a96a3;">· ' + g.items.length + '</span></a>';
   }).join('\n');
   return '<tr><td style="padding:20px 32px 6px;">\n' +
@@ -136,8 +138,8 @@ function _rendreRubrique_(rubrique, items, couleur, idx) {
   var entete = '<tr><td id="bx-r' + idx + '" style="padding:22px 32px 2px;">\n' +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>\n' +
     '<td style="width:4px;background:' + couleur + ';border-radius:2px;">&nbsp;</td>\n' +
-    '<td style="padding-left:12px;"><h2 style="margin:0;font-size:17px;color:' + couleur +
-    ';font-weight:700;letter-spacing:.2px;">' + _echapperHtml_(rubrique) + '</h2></td>\n' +
+    '<td style="padding-left:12px;"><h2 style="margin:0;font-size:16px;color:' + couleur +
+    ';font-weight:700;text-transform:uppercase;letter-spacing:.6px;">' + _echapperHtml_(rubrique) + '</h2></td>\n' +
     '</tr></table>\n</td></tr>\n';
   var corps = items.map(function(it) { return _rendreItem_(it, couleur); }).join('');
   return entete + corps;
@@ -171,14 +173,19 @@ function _rendreItem_(item, couleur) {
     infoBulle = '';
   }
 
-  return '<tr><td style="padding:6px 32px;">\n' +
+  return '<tr><td style="padding:7px 32px;">\n' +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" ' +
     'style="border:1px solid #e9edf1;border-left:3px solid ' + couleur + ';border-radius:6px;">\n' +
-    '<tr><td style="padding:14px 18px;">\n' +
+    '<tr><td style="padding:16px 18px;">\n' +
     '<a href="' + url + '"' + infoBulle + ' style="font-size:16px;font-weight:700;color:#14324a;' +
     'text-decoration:none;line-height:1.35;">' + titreAffiche + '</a>\n' +
-    '<div style="font-size:12px;color:#8a96a3;margin:5px 0 6px;">' + meta + '</div>\n' +
-    '<div style="font-size:14px;color:#3a4653;line-height:1.5;">' + resume + '</div>\n' +
+    // Piste 2 : méta en capitales espacées, plus discrète.
+    '<div style="font-size:11px;color:#8a96a3;text-transform:uppercase;letter-spacing:.4px;margin:6px 0 7px;">' +
+    meta + '</div>\n' +
+    '<div style="font-size:14px;color:#3a4653;line-height:1.55;">' + resume + '</div>\n' +
+    // Piste 4 : affordance « Lire l'article → » (couleur rubrique).
+    '<div style="margin-top:9px;"><a href="' + url + '"' + infoBulle + ' style="font-size:12px;' +
+    'font-weight:700;color:' + couleur + ';text-decoration:none;">Lire l\'article →</a></div>\n' +
     '</td></tr>\n</table>\n</td></tr>\n';
 }
 
