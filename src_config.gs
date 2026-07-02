@@ -16,7 +16,7 @@
  */
 var CONFIG_GLOBALE_DEFAUTS = {
   claude_model: 'claude-haiku-4-5-20251001',
-  claude_api_endpoint: 'https://api.anthropic.com/v1/messages/batches',
+  claude_api_endpoint: 'https://api.anthropic.com/v1/messages',
   gmail_quota_jour: 100,
   admin_email: '',
   dry_run_global: false,
