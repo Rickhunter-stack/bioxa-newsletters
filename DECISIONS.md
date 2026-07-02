@@ -652,6 +652,11 @@ accents (« é » → « � » / `ï¿œ`).
 - **`_lireCorpsReponse_(response)`** (I/O) : lit `Content-Type` (`getAllHeaders`), « sniffe » le
   prolog en **Latin-1** (mapping octet→char 1:1, ne casse jamais), détecte le charset, puis
   `getContentText(charset)`. **Jamais d'exception** : tout échec retombe sur `getContentText()` UTF-8.
+- **Auto-réparation mojibake (ajout post-test)** : certains flux (ex. « Le Monde Informatique »)
+  **déclarent UTF-8 mais servent du Latin-1/Windows-1252** → décoder selon la déclaration échoue
+  quand même. Si le corps décodé contient des caractères de remplacement **U+FFFD** (`_aMojibake_`),
+  on **re-décode en Windows-1252** (mappe tous les octets sans perte). Répare quel que soit ce que
+  le flux déclare. Ne se déclenche pas pour un flux UTF-8 valide (aucun U+FFFD).
 - Branché aux **2** points de lecture : lot `fetchAll` + repli séquentiel.
 - **Pas de rétro-correction** de `_historique` : le fix agit à la source, l'aval est corrigé aux
   prochains runs.

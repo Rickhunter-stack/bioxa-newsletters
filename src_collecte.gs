@@ -299,8 +299,12 @@ var CHARSETS_SUPPORTES = { 'utf-8': 'UTF-8', 'iso-8859-1': 'ISO-8859-1', 'window
  * `getContentText()` sans argument décode en UTF-8 ; un flux servi en
  * ISO-8859-1/Windows-1252 (fréquent côté FR) produit alors du mojibake sur les
  * accents (« é » → « ï¿œ »). On détecte donc le charset (en-tête HTTP puis
- * déclaration XML), et on re-décode en conséquence. Jamais d'exception : tout
- * échec retombe sur UTF-8.
+ * déclaration XML), et on re-décode en conséquence.
+ *
+ * Auto-réparation : certains flux DÉCLARENT UTF-8 mais SERVENT du Latin-1/1252
+ * (misconfiguration serveur). Si le décodage produit des caractères de
+ * remplacement U+FFFD, on re-décode en Windows-1252 (qui mappe tous les octets
+ * sans perte). Jamais d'exception : tout échec retombe sur UTF-8.
  *
  * @param {GoogleAppsScript.URL_Fetch.HTTPResponse} response
  * @return {string} Corps décodé.
@@ -323,7 +327,16 @@ function _lireCorpsReponse_(response) {
       prolog = '';
     }
     var charset = _detecterCharset_(contentType, prolog);
-    return response.getContentText(charset);
+    var corps = response.getContentText(charset);
+    // Auto-réparation : U+FFFD = charset erroné (flux Latin-1/1252 déclaré UTF-8).
+    if (_aMojibake_(corps) && charset.toLowerCase() !== 'windows-1252') {
+      var repli = response.getContentText('windows-1252');
+      if (!_aMojibake_(repli)) {
+        Logger.log('[collecte] Charset "%s" produit du mojibake — re-décodage Windows-1252.', charset);
+        return repli;
+      }
+    }
+    return corps;
   } catch (e) {
     Logger.log('[collecte][WARN] Décodage charset impossible, repli UTF-8 : %s', e.message);
     return response.getContentText();
@@ -352,6 +365,17 @@ function _detecterCharset_(contentType, prolog) {
     }
   }
   return 'UTF-8';
+}
+
+/**
+ * Détecte la présence de caractères de remplacement Unicode (U+FFFD), signe d'un
+ * décodage effectué avec le mauvais charset. PUR, testable offline.
+ * @param {string} texte
+ * @return {boolean}
+ * @private
+ */
+function _aMojibake_(texte) {
+  return _texte_(texte).indexOf(String.fromCharCode(0xFFFD)) !== -1;
 }
 
 /* ──────────────────────────────────────────────────────────────────────────

@@ -602,5 +602,11 @@ function testerDetecterCharset() {
   check(_detecterCharset_('text/xml; charset=ISO-8859-1', '<?xml encoding="utf-8"?>') === 'ISO-8859-1',
     'header prioritaire sur le prolog');
 
+  // 6. Détection de mojibake (U+FFFD) — déclenche le re-décodage Windows-1252.
+  var fffd = String.fromCharCode(0xFFFD);
+  check(_aMojibake_('Tra' + fffd + 'abilit' + fffd) === true, 'mojibake détecté (U+FFFD présent)');
+  check(_aMojibake_('Traçabilité') === false, 'texte accentué propre → pas de mojibake');
+  check(_aMojibake_('') === false, 'vide → pas de mojibake');
+
   Logger.log('--- testerDetecterCharset : %s ---', echecs === 0 ? 'OK (tous verts)' : (echecs + ' échec(s)'));
 }
